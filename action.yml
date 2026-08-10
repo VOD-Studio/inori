@@ -1,0 +1,41 @@
+name: 'Inori'
+description: 'AI code review for pull requests — works with any OpenAI-compatible LLM endpoint. Posts inline comments anchored to real diff lines.'
+author: 'VOD-Studio'
+branding:
+  icon: 'eye'
+  color: 'purple'
+
+inputs:
+  llm_endpoint:
+    description: 'OpenAI-compatible API base URL, e.g. https://api.deepseek.com/v1'
+    required: true
+  llm_model:
+    description: 'Model name for both the API call and the review title, e.g. deepseek-chat'
+    required: true
+  llm_api_key:
+    description: 'API key for the LLM endpoint'
+    required: true
+  github_token:
+    description: 'GitHub token with pull-requests:write. Defaults to the workflow token.'
+    required: true
+    default: ${{ github.token }}
+  language:
+    description: 'Output language for review comments: zh | en'
+    required: false
+    default: 'zh'
+  ignore_patterns:
+    description: 'Comma-separated glob patterns of files to skip (lockfiles, changelogs, etc.)'
+    required: false
+    default: 'pnpm-lock.yaml,go.sum,package-lock.json,yarn.lock,CHANGELOG.md'
+  max_diff_chars:
+    description: 'Character limit before the diff is truncated (controls LLM context cost)'
+    required: false
+    default: '40000'
+  max_body_chars:
+    description: 'Character limit for the review body (GitHub caps at 65536)'
+    required: false
+    default: '60000'
+
+runs:
+  using: 'node20'
+  main: 'dist/index.js'

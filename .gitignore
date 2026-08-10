@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Node
+node_modules/
+
+# 构建产物由 ncc 生成，但 dist/ 必须提交（action 引用时不会跑 npm install）
+# 所以 dist/ 不在 gitignore 里
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
