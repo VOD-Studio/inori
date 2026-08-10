@@ -8,7 +8,7 @@ Inori reviews your PR diff and posts findings as **inline comments anchored to r
 
 - **Any OpenAI-compatible endpoint.** DeepSeek, Moonshot (Kimi), GLM, Qwen, local Ollama, or OpenAI itself — if it speaks the `/chat/completions` API, Inori works with it.
 - **Inline comments on real lines.** Every comment's line number is validated against the actual diff before posting; comments that don't land on a real added line fall back to the summary instead of dangling.
-- **Native GitHub Action.** Built on Node 20 with the official `@actions/*` SDK — a single self-contained `dist/index.js`, no runtime install step on the runner.
+- **Native GitHub Action.** Built on Node 24 with the official `@actions/*` SDK — a single self-contained `dist/index.js`, no runtime install step on the runner.
 - **Bring your own key.** No per-seat subscription; you pay your LLM provider directly.
 
 ## Quick start
