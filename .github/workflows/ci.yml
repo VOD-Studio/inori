@@ -1,0 +1,91 @@
+# CI 流水线
+#
+# PR 和 push 到 main 时触发。顺序：typecheck → test → build → dist 一致性校验。
+# dist/ 必须与 src/ 同步提交（node20 action 在 runner 上直接跑 dist/index.js，
+# 不执行 build），因此「dist 是否最新」是这类项目的核心检查项。
+#
+# 任一步骤失败则 PR 检查失败，阻止合并。
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# 同一分支多次 push 时取消旧的运行
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Typecheck · Test · Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
+
+      # dist 一致性校验：贡献者改了 src/ 但忘了重新 build 并提交 dist/
+      # 是 node20 action 的头号 bug 来源。build 重新生成 dist 后若与提交内容
+      # 不一致，说明 dist 过期，直接失败。
+      - name: Verify dist is up to date
+        run: |
+          if [ -n "$(git status --porcelain dist)" ]; then
+            echo "::error::dist/ 与 src/ 不同步：请本地运行 pnpm build 并提交结果"
+            git --no-pager diff --stat dist
+            exit 1
+          fi
+
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # 高危漏洞告警；高危未必被实际调用，初期 advisory 不阻断
+      - name: pnpm audit
+        run: pnpm audit --audit-level=high
+        continue-on-error: true
