@@ -7,6 +7,8 @@ import {
   addedLines,
   parseReviews,
   buildPrompt,
+  LlmHttpError,
+  isRetryableLlmError,
   type PrFile,
   type InlineComment,
 } from "./logic";
@@ -27,6 +29,11 @@ const IGNORE_PATTERNS = core.getInput("ignore_patterns")
   .filter(Boolean);
 const MAX_DIFF_CHARS = parseInt(core.getInput("max_diff_chars") || "40000", 10);
 const MAX_BODY_CHARS = parseInt(core.getInput("max_body_chars") || "60000", 10);
+
+// 单次 LLM 调用 5 分钟上限，端点挂起时及时中止而不是卡满整个 job
+const LLM_TIMEOUT_MS = 300_000;
+// 429/5xx/超时/网络错误的退避重试次数
+const MAX_LLM_RETRIES = 3;
 
 const T = I18N[LANGUAGE] ?? I18N.zh;
 
@@ -79,25 +86,20 @@ async function getPrDiff(
 
 // ── IO：调用 LLM ──
 
-/** 调用 OpenAI 兼容的 /chat/completions 接口 */
-async function callLlm(diff: string): Promise<string> {
-  const prompt = buildPrompt(diff, LANGUAGE);
+/** 单次调用 OpenAI 兼容的 /chat/completions 接口，非 2xx 抛 LlmHttpError */
+async function chatCompletions(body: Record<string, unknown>): Promise<string> {
   const resp = await fetch(`${LLM_ENDPOINT}/chat/completions`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${LLM_API_KEY}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      model: LLM_MODEL,
-      messages: [{ role: "user", content: prompt }],
-      temperature: 0.3,
-      response_format: { type: "json_object" },
-    }),
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(LLM_TIMEOUT_MS),
   });
   if (!resp.ok) {
     const detail = (await resp.text()).slice(0, 200);
-    throw new Error(`LLM HTTP ${resp.status}: ${detail}`);
+    throw new LlmHttpError(resp.status, detail);
   }
   const data = (await resp.json()) as {
     choices?: { message?: { content?: string } }[];
@@ -107,6 +109,43 @@ async function callLlm(diff: string): Promise<string> {
     throw new Error(`LLM 响应结构异常: ${JSON.stringify(data).slice(0, 300)}`);
   }
   return content.trim();
+}
+
+/**
+ * 调用 LLM：
+ * - 部分兼容端点不支持 response_format（通常报 400），自动去掉该参数重试一次；
+ * - 429/5xx/超时/网络错误按指数退避重试，最多 MAX_LLM_RETRIES 次。
+ */
+async function callLlm(diff: string): Promise<string> {
+  const prompt = buildPrompt(diff, LANGUAGE);
+  const body: Record<string, unknown> = {
+    model: LLM_MODEL,
+    messages: [{ role: "user", content: prompt }],
+    temperature: 0.3,
+    response_format: { type: "json_object" },
+  };
+
+  let droppedResponseFormat = false;
+  let attempt = 0;
+  for (;;) {
+    try {
+      return await chatCompletions(body);
+    } catch (e) {
+      if (e instanceof LlmHttpError && e.status === 400 && !droppedResponseFormat) {
+        droppedResponseFormat = true;
+        delete body.response_format;
+        core.warning("端点可能不支持 response_format，已去掉该参数重试");
+        continue;
+      }
+      attempt += 1;
+      if (attempt > MAX_LLM_RETRIES || !isRetryableLlmError(e)) throw e;
+      const delayMs = 1000 * 2 ** attempt;
+      core.warning(
+        `LLM 调用失败：${(e as Error).message}，${delayMs / 1000}s 后重试（${attempt}/${MAX_LLM_RETRIES}）`
+      );
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
 }
 
 // ── IO：发布评审 ──

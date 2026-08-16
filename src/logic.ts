@@ -113,6 +113,20 @@ export function addedLines(patch: string): Set<number> {
 }
 
 /**
+ * 从模型输出中提取 JSON 文本。模型常无视「不要代码块」的指令，
+ * 先剥离 ``` 围栏，再按最外层花括号截取（容忍围栏外的说明文字）。
+ */
+export function extractJson(content: string): string {
+  let s = content.trim();
+  const fenced = s.match(/^```[\w-]*\s*([\s\S]*?)\s*```$/);
+  if (fenced) s = fenced[1].trim();
+  const start = s.indexOf("{");
+  const end = s.lastIndexOf("}");
+  if (start !== -1 && end > start) s = s.slice(start, end + 1);
+  return s;
+}
+
+/**
  * 解析模型 JSON 输出。
  * inline 锚点行号必须落在对应文件 patch 的新增行上，否则降级到 body 清单。
  */
@@ -122,7 +136,7 @@ export function parseReviews(
 ): { summary: string; inlines: InlineComment[]; bodyItems: string[] } {
   let parsed: LlmResponse;
   try {
-    parsed = JSON.parse(content) as LlmResponse;
+    parsed = JSON.parse(extractJson(content)) as LlmResponse;
   } catch {
     return { summary: content, inlines: [], bodyItems: [] };
   }
@@ -162,4 +176,24 @@ export function buildPrompt(diff: string, lang: Lang): string {
     "omit line when unsure.\n" +
     "If there are no issues, reviews is an empty array.\n";
   return t.promptIntro + fmt + rules + t.langHint + `\n\n${t.diffIntro}\n\n${diff}`;
+}
+
+// ── LLM 调用错误分类（纯逻辑，供 index.ts 做重试决策）──
+
+/** LLM HTTP 错误，携带状态码用于重试决策 */
+export class LlmHttpError extends Error {
+  constructor(
+    readonly status: number,
+    detail: string
+  ) {
+    super(`LLM HTTP ${status}: ${detail}`);
+    this.name = "LlmHttpError";
+  }
+}
+
+/** 可重试的错误：429/5xx、网络层失败（TypeError）、超时/中止 */
+export function isRetryableLlmError(e: unknown): boolean {
+  if (e instanceof LlmHttpError) return e.status === 429 || e.status >= 500;
+  if (e instanceof TypeError) return true;
+  return e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError");
 }

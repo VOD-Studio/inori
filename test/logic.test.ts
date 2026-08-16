@@ -4,6 +4,8 @@ import {
   addedLines,
   parseReviews,
   buildPrompt,
+  isRetryableLlmError,
+  LlmHttpError,
 } from "../src/logic";
 
 // isIgnored 用 action 的真实默认 patterns（与 action.yml 一致）
@@ -127,6 +129,64 @@ describe("parseReviews", () => {
     const r = parseReviews("not json", fileLines);
     expect(r.summary).toBe("not json");
     expect(r.inlines).toHaveLength(0);
+  });
+});
+
+describe("parseReviews 围栏容错", () => {
+  const fileLines = new Map([["a.ts", new Set([5])]]);
+
+  it("剥离 ```json 围栏后正常解析", () => {
+    const content =
+      '```json\n{"summary":"s","reviews":[{"path":"a.ts","line":5,"comment":"bug"}]}\n```';
+    const r = parseReviews(content, fileLines);
+    expect(r.summary).toBe("s");
+    expect(r.inlines).toHaveLength(1);
+  });
+
+  it("无语言标记的围栏也能解析", () => {
+    const r = parseReviews('```\n{"summary":"s"}\n```', fileLines);
+    expect(r.summary).toBe("s");
+  });
+
+  it("围栏外有说明文字时提取 JSON 部分", () => {
+    const r = parseReviews('评审结果如下：\n```json\n{"summary":"s"}\n```\n以上。', fileLines);
+    expect(r.summary).toBe("s");
+  });
+
+  it("无围栏但前后有杂质时按花括号截取", () => {
+    const r = parseReviews('result: {"summary":"s"} (end)', fileLines);
+    expect(r.summary).toBe("s");
+  });
+
+  it("围栏内 JSON 损坏时回退原文 summary", () => {
+    const content = "```json\n{broken\n```";
+    const r = parseReviews(content, fileLines);
+    expect(r.summary).toBe(content);
+    expect(r.inlines).toHaveLength(0);
+  });
+});
+
+describe("isRetryableLlmError", () => {
+  it("429 与 5xx 可重试，400 不可", () => {
+    expect(isRetryableLlmError(new LlmHttpError(429, "rate limit"))).toBe(true);
+    expect(isRetryableLlmError(new LlmHttpError(503, "unavailable"))).toBe(true);
+    expect(isRetryableLlmError(new LlmHttpError(400, "bad request"))).toBe(false);
+  });
+
+  it("网络层错误（TypeError）可重试", () => {
+    expect(isRetryableLlmError(new TypeError("fetch failed"))).toBe(true);
+  });
+
+  it("超时中止可重试", () => {
+    const timeout = new Error("signal timed out");
+    timeout.name = "TimeoutError";
+    expect(isRetryableLlmError(timeout)).toBe(true);
+  });
+
+  it("其他错误不可重试", () => {
+    expect(isRetryableLlmError(new Error("LLM 响应结构异常"))).toBe(false);
+    expect(isRetryableLlmError(null)).toBe(false);
+    expect(isRetryableLlmError("error")).toBe(false);
   });
 });
 

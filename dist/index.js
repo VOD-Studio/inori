@@ -30391,6 +30391,10 @@ const IGNORE_PATTERNS = core.getInput("ignore_patterns")
     .filter(Boolean);
 const MAX_DIFF_CHARS = parseInt(core.getInput("max_diff_chars") || "40000", 10);
 const MAX_BODY_CHARS = parseInt(core.getInput("max_body_chars") || "60000", 10);
+// 单次 LLM 调用 5 分钟上限，端点挂起时及时中止而不是卡满整个 job
+const LLM_TIMEOUT_MS = 300_000;
+// 429/5xx/超时/网络错误的退避重试次数
+const MAX_LLM_RETRIES = 3;
 const T = logic_1.I18N[LANGUAGE] ?? logic_1.I18N.zh;
 // ── IO：拉取 diff ──
 /**
@@ -30433,25 +30437,20 @@ async function getPrDiff(octokit, repo, prNumber) {
     return { diff, fileLines };
 }
 // ── IO：调用 LLM ──
-/** 调用 OpenAI 兼容的 /chat/completions 接口 */
-async function callLlm(diff) {
-    const prompt = (0, logic_1.buildPrompt)(diff, LANGUAGE);
+/** 单次调用 OpenAI 兼容的 /chat/completions 接口，非 2xx 抛 LlmHttpError */
+async function chatCompletions(body) {
     const resp = await fetch(`${LLM_ENDPOINT}/chat/completions`, {
         method: "POST",
         headers: {
             Authorization: `Bearer ${LLM_API_KEY}`,
             "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-            model: LLM_MODEL,
-            messages: [{ role: "user", content: prompt }],
-            temperature: 0.3,
-            response_format: { type: "json_object" },
-        }),
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(LLM_TIMEOUT_MS),
     });
     if (!resp.ok) {
         const detail = (await resp.text()).slice(0, 200);
-        throw new Error(`LLM HTTP ${resp.status}: ${detail}`);
+        throw new logic_1.LlmHttpError(resp.status, detail);
     }
     const data = (await resp.json());
     const content = data.choices?.[0]?.message?.content;
@@ -30459,6 +30458,41 @@ async function callLlm(diff) {
         throw new Error(`LLM 响应结构异常: ${JSON.stringify(data).slice(0, 300)}`);
     }
     return content.trim();
+}
+/**
+ * 调用 LLM：
+ * - 部分兼容端点不支持 response_format（通常报 400），自动去掉该参数重试一次；
+ * - 429/5xx/超时/网络错误按指数退避重试，最多 MAX_LLM_RETRIES 次。
+ */
+async function callLlm(diff) {
+    const prompt = (0, logic_1.buildPrompt)(diff, LANGUAGE);
+    const body = {
+        model: LLM_MODEL,
+        messages: [{ role: "user", content: prompt }],
+        temperature: 0.3,
+        response_format: { type: "json_object" },
+    };
+    let droppedResponseFormat = false;
+    let attempt = 0;
+    for (;;) {
+        try {
+            return await chatCompletions(body);
+        }
+        catch (e) {
+            if (e instanceof logic_1.LlmHttpError && e.status === 400 && !droppedResponseFormat) {
+                droppedResponseFormat = true;
+                delete body.response_format;
+                core.warning("端点可能不支持 response_format，已去掉该参数重试");
+                continue;
+            }
+            attempt += 1;
+            if (attempt > MAX_LLM_RETRIES || !(0, logic_1.isRetryableLlmError)(e))
+                throw e;
+            const delayMs = 1000 * 2 ** attempt;
+            core.warning(`LLM 调用失败：${e.message}，${delayMs / 1000}s 后重试（${attempt}/${MAX_LLM_RETRIES}）`);
+            await new Promise((resolve) => setTimeout(resolve, delayMs));
+        }
+    }
 }
 // ── IO：发布评审 ──
 /** 发布评审：先逐条发 inline 评论（失败跳过），再发汇总 review */
@@ -30534,11 +30568,13 @@ main().catch((e) => {
 "use strict";
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.I18N = void 0;
+exports.LlmHttpError = exports.I18N = void 0;
 exports.isIgnored = isIgnored;
 exports.addedLines = addedLines;
+exports.extractJson = extractJson;
 exports.parseReviews = parseReviews;
 exports.buildPrompt = buildPrompt;
+exports.isRetryableLlmError = isRetryableLlmError;
 const minimatch_1 = __nccwpck_require__(7414);
 // ── i18n 文案 ──
 exports.I18N = {
@@ -30619,13 +30655,28 @@ function addedLines(patch) {
     return lines;
 }
 /**
+ * 从模型输出中提取 JSON 文本。模型常无视「不要代码块」的指令，
+ * 先剥离 ``` 围栏，再按最外层花括号截取（容忍围栏外的说明文字）。
+ */
+function extractJson(content) {
+    let s = content.trim();
+    const fenced = s.match(/^```[\w-]*\s*([\s\S]*?)\s*```$/);
+    if (fenced)
+        s = fenced[1].trim();
+    const start = s.indexOf("{");
+    const end = s.lastIndexOf("}");
+    if (start !== -1 && end > start)
+        s = s.slice(start, end + 1);
+    return s;
+}
+/**
  * 解析模型 JSON 输出。
  * inline 锚点行号必须落在对应文件 patch 的新增行上，否则降级到 body 清单。
  */
 function parseReviews(content, fileLines) {
     let parsed;
     try {
-        parsed = JSON.parse(content);
+        parsed = JSON.parse(extractJson(content));
     }
     catch {
         return { summary: content, inlines: [], bodyItems: [] };
@@ -30664,6 +30715,25 @@ function buildPrompt(diff, lang) {
         "omit line when unsure.\n" +
         "If there are no issues, reviews is an empty array.\n";
     return t.promptIntro + fmt + rules + t.langHint + `\n\n${t.diffIntro}\n\n${diff}`;
+}
+// ── LLM 调用错误分类（纯逻辑，供 index.ts 做重试决策）──
+/** LLM HTTP 错误，携带状态码用于重试决策 */
+class LlmHttpError extends Error {
+    status;
+    constructor(status, detail) {
+        super(`LLM HTTP ${status}: ${detail}`);
+        this.status = status;
+        this.name = "LlmHttpError";
+    }
+}
+exports.LlmHttpError = LlmHttpError;
+/** 可重试的错误：429/5xx、网络层失败（TypeError）、超时/中止 */
+function isRetryableLlmError(e) {
+    if (e instanceof LlmHttpError)
+        return e.status === 429 || e.status >= 500;
+    if (e instanceof TypeError)
+        return true;
+    return e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError");
 }
 
 
