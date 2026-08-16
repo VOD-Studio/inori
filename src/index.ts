@@ -2,11 +2,12 @@ import * as core from "@actions/core";
 import * as github from "@actions/github";
 import { GitHub } from "@actions/github/lib/utils";
 import {
-  I18N,
   isIgnored,
   addedLines,
   parseReviews,
   buildPrompt,
+  buildReviewBody,
+  REVIEW_MARKER,
   LlmHttpError,
   isRetryableLlmError,
   type PrFile,
@@ -29,13 +30,12 @@ const IGNORE_PATTERNS = core.getInput("ignore_patterns")
   .filter(Boolean);
 const MAX_DIFF_CHARS = parseInt(core.getInput("max_diff_chars") || "40000", 10);
 const MAX_BODY_CHARS = parseInt(core.getInput("max_body_chars") || "60000", 10);
+const CUSTOM_INSTRUCTIONS = core.getInput("custom_instructions");
 
 // 单次 LLM 调用 5 分钟上限，端点挂起时及时中止而不是卡满整个 job
 const LLM_TIMEOUT_MS = 300_000;
 // 429/5xx/超时/网络错误的退避重试次数
 const MAX_LLM_RETRIES = 3;
-
-const T = I18N[LANGUAGE] ?? I18N.zh;
 
 // ── IO：拉取 diff ──
 
@@ -117,7 +117,7 @@ async function chatCompletions(body: Record<string, unknown>): Promise<string> {
  * - 429/5xx/超时/网络错误按指数退避重试，最多 MAX_LLM_RETRIES 次。
  */
 async function callLlm(diff: string): Promise<string> {
-  const prompt = buildPrompt(diff, LANGUAGE);
+  const prompt = buildPrompt(diff, LANGUAGE, CUSTOM_INSTRUCTIONS);
   const body: Record<string, unknown> = {
     model: LLM_MODEL,
     messages: [{ role: "user", content: prompt }],
@@ -150,7 +150,74 @@ async function callLlm(diff: string): Promise<string> {
 
 // ── IO：发布评审 ──
 
-/** 发布评审：先逐条发 inline 评论（失败跳过），再发汇总 review */
+/**
+ * 删除上一轮 inori 的 inline 评论（body 内嵌标记识别）。
+ * 有人回复过的线程跳过，不破坏人工讨论。
+ */
+async function deleteOldInlineComments(
+  octokit: OctokitInstance,
+  repo: { owner: string; repo: string },
+  prNumber: number
+): Promise<void> {
+  const all: { id: number; body?: string | null; in_reply_to_id?: number }[] = [];
+  let page = 1;
+  let comments: typeof all = [];
+  do {
+    const resp = await octokit.rest.pulls.listReviewComments({
+      ...repo,
+      pull_number: prNumber,
+      per_page: 100,
+      page,
+    });
+    comments = resp.data as typeof all;
+    all.push(...comments);
+    page += 1;
+  } while (comments.length === 100);
+
+  const replied = new Set(
+    all.filter((c) => c.in_reply_to_id).map((c) => c.in_reply_to_id as number)
+  );
+  for (const c of all) {
+    if (!c.body?.includes(REVIEW_MARKER) || c.in_reply_to_id || replied.has(c.id)) continue;
+    try {
+      await octokit.rest.pulls.deleteReviewComment({ ...repo, comment_id: c.id });
+    } catch (e) {
+      core.warning(`删除旧 inline 评论 #${c.id} 失败：${(e as Error).message}`);
+    }
+  }
+}
+
+/** 找到最近一轮 inori 评审的 id（body 内嵌标记识别），无则返回 null */
+async function findOldReviewId(
+  octokit: OctokitInstance,
+  repo: { owner: string; repo: string },
+  prNumber: number
+): Promise<number | null> {
+  let target: number | null = null;
+  let page = 1;
+  let reviews: { id: number; body?: string | null }[] = [];
+  do {
+    const resp = await octokit.rest.pulls.listReviews({
+      ...repo,
+      pull_number: prNumber,
+      per_page: 100,
+      page,
+    });
+    reviews = resp.data as { id: number; body?: string | null }[];
+    // 列表按提交时间升序，持续覆盖取最后一个命中的
+    for (const rv of reviews) {
+      if (rv.body?.includes(REVIEW_MARKER)) target = rv.id;
+    }
+    page += 1;
+  } while (reviews.length === 100);
+  return target;
+}
+
+/**
+ * 发布评审（更新复用模式）：GitHub REST 无法删除已提交的 review，
+ * 因此汇总 body 复用同一轮评审（updateReview 原地更新），inline 评论
+ * 先删旧的再逐条发新的（每条内嵌标记供下轮识别清理），多次 push 不堆叠。
+ */
 async function postReview(
   octokit: OctokitInstance,
   repo: { owner: string; repo: string },
@@ -159,13 +226,44 @@ async function postReview(
   body: string,
   inlines: InlineComment[]
 ): Promise<void> {
-  // inline 评论先建；锚点无效或 API 失败时跳过该条，body 汇总仍覆盖整体结论
+  try {
+    await deleteOldInlineComments(octokit, repo, prNumber);
+  } catch (e) {
+    core.warning(`清理旧 inline 评论失败，继续发布：${(e as Error).message}`);
+  }
+
+  let posted = false;
+  try {
+    const oldId = await findOldReviewId(octokit, repo, prNumber);
+    if (oldId !== null) {
+      await octokit.rest.pulls.updateReview({
+        ...repo,
+        pull_number: prNumber,
+        review_id: oldId,
+        body,
+      });
+      posted = true;
+    }
+  } catch (e) {
+    core.warning(`更新旧评审失败，改为新建：${(e as Error).message}`);
+  }
+  if (!posted) {
+    await octokit.rest.pulls.createReview({
+      ...repo,
+      pull_number: prNumber,
+      body,
+      event: "COMMENT",
+      commit_id: headSha,
+    });
+  }
+
+  // inline 逐条发布，单条失败只跳过该条；汇总 body 已覆盖整体结论
   for (const ic of inlines) {
     try {
       await octokit.rest.pulls.createReviewComment({
         ...repo,
         pull_number: prNumber,
-        body: ic.body,
+        body: `${ic.body}\n\n${REVIEW_MARKER}`,
         path: ic.path,
         line: ic.line,
         commit_id: headSha,
@@ -175,13 +273,6 @@ async function postReview(
       core.warning(`inline 评论失败，跳过该条：${(e as Error).message}`);
     }
   }
-  await octokit.rest.pulls.createReview({
-    ...repo,
-    pull_number: prNumber,
-    body,
-    event: "COMMENT",
-    commit_id: headSha,
-  });
 }
 
 // ── 入口 ──
@@ -208,19 +299,8 @@ async function main(): Promise<void> {
 
   const content = await callLlm(diff);
   const { summary, inlines, bodyItems } = parseReviews(content, fileLines);
-  if (!summary && !inlines.length && !bodyItems.length) {
-    core.info("模型未输出评审意见");
-    return;
-  }
-
-  let body = `${T.reviewTitle}\n\n${T.summaryHeading}\n${summary || T.noIssues}`;
-  if (bodyItems.length) {
-    body += `\n\n${T.othersHeading}\n` + bodyItems.join("\n");
-  }
-  if (body.length > MAX_BODY_CHARS) {
-    core.info(`评审内容过长（${body.length} 字符），截断`);
-    body = body.slice(0, MAX_BODY_CHARS) + `\n\n${T.truncated}`;
-  }
+  // 空结果也发布「未发现问题」并替换旧评审，避免上一轮的意见残留误导
+  const body = buildReviewBody({ summary, bodyItems, model: LLM_MODEL }, LANGUAGE, MAX_BODY_CHARS);
 
   await postReview(octokit, repo, pr.number, pr.head.sha, body, inlines);
   core.info("评审已发布");

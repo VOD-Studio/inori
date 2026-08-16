@@ -8,6 +8,7 @@ Inori reviews your PR diff and posts findings as **inline comments anchored to r
 
 - **Any OpenAI-compatible endpoint.** DeepSeek, Moonshot (Kimi), GLM, Qwen, local Ollama, or OpenAI itself — if it speaks the `/chat/completions` API, Inori works with it.
 - **Inline comments on real lines.** Every comment's line number is validated against the actual diff before posting; comments that don't land on a real added line fall back to the summary instead of dangling.
+- **Idempotent re-reviews.** Each push re-reviews the PR and replaces Inori's previous feedback — stale inline comments are deleted and the summary review is updated in place — instead of stacking duplicates.
 - **Native GitHub Action.** Built on Node 24 with the official `@actions/*` SDK — a single self-contained `dist/index.js`, no runtime install step on the runner.
 - **Bring your own key.** No per-seat subscription; you pay your LLM provider directly.
 
@@ -65,6 +66,7 @@ jobs:
 | `ignore_patterns` | Comma-separated globs of files to skip | — | `pnpm-lock.yaml,go.sum,package-lock.json,yarn.lock,CHANGELOG.md` |
 | `max_diff_chars` | Character limit before the diff is truncated | — | `40000` |
 | `max_body_chars` | Character limit for the review body (GitHub caps at 65536) | — | `60000` |
+| `custom_instructions` | Extra review rules appended to the prompt (team conventions, banned APIs, etc.) | — | — |
 
 ## How it works
 
@@ -72,7 +74,7 @@ jobs:
 2. Builds a diff, skipping files matching `ignore_patterns`. Large diffs are truncated to `max_diff_chars`.
 3. Sends the diff to your LLM with a structured prompt that asks for strict JSON output and includes a prompt-injection guard (diff content is treated as untrusted data).
 4. Parses the JSON response. Findings with a valid line number (one that matches a real `+` added line in the diff) become inline comments; the rest go into the summary.
-5. Posts inline comments first (skipping any that fail), then a single summary review comment.
+5. Replaces the previous Inori feedback: stale inline comments (identified by a hidden marker embedded in each body) are deleted — except threads someone has replied to — and the summary review body is updated in place. GitHub's REST API can't delete submitted reviews, so Inori reuses a single review per PR instead of stacking new ones.
 
 When the diff is truncated, inline anchoring is disabled entirely — all findings go into the summary to avoid comments landing on lines the model never saw.
 

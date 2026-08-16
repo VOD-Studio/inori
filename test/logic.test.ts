@@ -4,6 +4,8 @@ import {
   addedLines,
   parseReviews,
   buildPrompt,
+  buildReviewBody,
+  REVIEW_MARKER,
   isRetryableLlmError,
   LlmHttpError,
 } from "../src/logic";
@@ -202,5 +204,63 @@ describe("buildPrompt", () => {
     const p = buildPrompt("D", "en");
     expect(p).toContain("Output in English");
     expect(p).toContain("critical|major|minor");
+  });
+});
+
+describe("buildPrompt 自定义规则", () => {
+  it("customInstructions 注入 prompt", () => {
+    const p = buildPrompt("D", "zh", "禁止使用 moment；错误必须向上抛出");
+    expect(p).toContain("仓库自定义审查要求");
+    expect(p).toContain("禁止使用 moment；错误必须向上抛出");
+    expect(p).toContain("D");
+  });
+
+  it("不传时不注入自定义段落", () => {
+    const p = buildPrompt("D", "zh");
+    expect(p).not.toContain("仓库自定义审查要求");
+  });
+
+  it("空白内容视为未传入", () => {
+    const p = buildPrompt("D", "zh", "   ");
+    expect(p).not.toContain("仓库自定义审查要求");
+  });
+});
+
+describe("buildReviewBody", () => {
+  it("标题含模型名，结尾嵌隐藏标记", () => {
+    const body = buildReviewBody({ summary: "s", bodyItems: [], model: "deepseek-chat" }, "zh", 60000);
+    expect(body).toContain("### AI Code Review · deepseek-chat");
+    expect(body).toContain("## 评审结论\ns");
+    expect(body.endsWith(REVIEW_MARKER)).toBe(true);
+  });
+
+  it("bodyItems 进入其他问题清单", () => {
+    const body = buildReviewBody(
+      { summary: "s", bodyItems: ["- 存在问题（a.ts）"], model: "m" },
+      "zh",
+      60000
+    );
+    expect(body).toContain("## 其他问题\n- 存在问题（a.ts）");
+  });
+
+  it("空 summary 显示无问题文案", () => {
+    const body = buildReviewBody({ summary: "", bodyItems: [], model: "m" }, "zh", 60000);
+    expect(body).toContain("未发现明显问题");
+  });
+
+  it("截断后仍保留截断提示与标记", () => {
+    const body = buildReviewBody(
+      { summary: "x".repeat(100), bodyItems: [], model: "m" },
+      "zh",
+      50
+    );
+    expect(body).toContain("（内容过长已截断）");
+    expect(body.endsWith(REVIEW_MARKER)).toBe(true);
+  });
+
+  it("en 文案生效", () => {
+    const body = buildReviewBody({ summary: "", bodyItems: [], model: "m" }, "en", 60000);
+    expect(body).toContain("No significant issues found");
+    expect(body.endsWith(REVIEW_MARKER)).toBe(true);
   });
 });

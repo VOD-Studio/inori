@@ -35,6 +35,10 @@ inputs:
     description: 'Character limit for the review body (GitHub caps at 65536)'
     required: false
     default: '60000'
+  custom_instructions:
+    description: 'Extra review rules appended to the prompt (team conventions, banned APIs, etc.)'
+    required: false
+    default: ''
 
 runs:
   using: 'node24'

@@ -30391,11 +30391,11 @@ const IGNORE_PATTERNS = core.getInput("ignore_patterns")
     .filter(Boolean);
 const MAX_DIFF_CHARS = parseInt(core.getInput("max_diff_chars") || "40000", 10);
 const MAX_BODY_CHARS = parseInt(core.getInput("max_body_chars") || "60000", 10);
+const CUSTOM_INSTRUCTIONS = core.getInput("custom_instructions");
 // 单次 LLM 调用 5 分钟上限，端点挂起时及时中止而不是卡满整个 job
 const LLM_TIMEOUT_MS = 300_000;
 // 429/5xx/超时/网络错误的退避重试次数
 const MAX_LLM_RETRIES = 3;
-const T = logic_1.I18N[LANGUAGE] ?? logic_1.I18N.zh;
 // ── IO：拉取 diff ──
 /**
  * 分页拉取 PR 全部文件（GitHub API 单页上限 100），拼接 diff，
@@ -30465,7 +30465,7 @@ async function chatCompletions(body) {
  * - 429/5xx/超时/网络错误按指数退避重试，最多 MAX_LLM_RETRIES 次。
  */
 async function callLlm(diff) {
-    const prompt = (0, logic_1.buildPrompt)(diff, LANGUAGE);
+    const prompt = (0, logic_1.buildPrompt)(diff, LANGUAGE, CUSTOM_INSTRUCTIONS);
     const body = {
         model: LLM_MODEL,
         messages: [{ role: "user", content: prompt }],
@@ -30495,15 +30495,103 @@ async function callLlm(diff) {
     }
 }
 // ── IO：发布评审 ──
-/** 发布评审：先逐条发 inline 评论（失败跳过），再发汇总 review */
+/**
+ * 删除上一轮 inori 的 inline 评论（body 内嵌标记识别）。
+ * 有人回复过的线程跳过，不破坏人工讨论。
+ */
+async function deleteOldInlineComments(octokit, repo, prNumber) {
+    const all = [];
+    let page = 1;
+    let comments = [];
+    do {
+        const resp = await octokit.rest.pulls.listReviewComments({
+            ...repo,
+            pull_number: prNumber,
+            per_page: 100,
+            page,
+        });
+        comments = resp.data;
+        all.push(...comments);
+        page += 1;
+    } while (comments.length === 100);
+    const replied = new Set(all.filter((c) => c.in_reply_to_id).map((c) => c.in_reply_to_id));
+    for (const c of all) {
+        if (!c.body?.includes(logic_1.REVIEW_MARKER) || c.in_reply_to_id || replied.has(c.id))
+            continue;
+        try {
+            await octokit.rest.pulls.deleteReviewComment({ ...repo, comment_id: c.id });
+        }
+        catch (e) {
+            core.warning(`删除旧 inline 评论 #${c.id} 失败：${e.message}`);
+        }
+    }
+}
+/** 找到最近一轮 inori 评审的 id（body 内嵌标记识别），无则返回 null */
+async function findOldReviewId(octokit, repo, prNumber) {
+    let target = null;
+    let page = 1;
+    let reviews = [];
+    do {
+        const resp = await octokit.rest.pulls.listReviews({
+            ...repo,
+            pull_number: prNumber,
+            per_page: 100,
+            page,
+        });
+        reviews = resp.data;
+        // 列表按提交时间升序，持续覆盖取最后一个命中的
+        for (const rv of reviews) {
+            if (rv.body?.includes(logic_1.REVIEW_MARKER))
+                target = rv.id;
+        }
+        page += 1;
+    } while (reviews.length === 100);
+    return target;
+}
+/**
+ * 发布评审（更新复用模式）：GitHub REST 无法删除已提交的 review，
+ * 因此汇总 body 复用同一轮评审（updateReview 原地更新），inline 评论
+ * 先删旧的再逐条发新的（每条内嵌标记供下轮识别清理），多次 push 不堆叠。
+ */
 async function postReview(octokit, repo, prNumber, headSha, body, inlines) {
-    // inline 评论先建；锚点无效或 API 失败时跳过该条，body 汇总仍覆盖整体结论
+    try {
+        await deleteOldInlineComments(octokit, repo, prNumber);
+    }
+    catch (e) {
+        core.warning(`清理旧 inline 评论失败，继续发布：${e.message}`);
+    }
+    let posted = false;
+    try {
+        const oldId = await findOldReviewId(octokit, repo, prNumber);
+        if (oldId !== null) {
+            await octokit.rest.pulls.updateReview({
+                ...repo,
+                pull_number: prNumber,
+                review_id: oldId,
+                body,
+            });
+            posted = true;
+        }
+    }
+    catch (e) {
+        core.warning(`更新旧评审失败，改为新建：${e.message}`);
+    }
+    if (!posted) {
+        await octokit.rest.pulls.createReview({
+            ...repo,
+            pull_number: prNumber,
+            body,
+            event: "COMMENT",
+            commit_id: headSha,
+        });
+    }
+    // inline 逐条发布，单条失败只跳过该条；汇总 body 已覆盖整体结论
     for (const ic of inlines) {
         try {
             await octokit.rest.pulls.createReviewComment({
                 ...repo,
                 pull_number: prNumber,
-                body: ic.body,
+                body: `${ic.body}\n\n${logic_1.REVIEW_MARKER}`,
                 path: ic.path,
                 line: ic.line,
                 commit_id: headSha,
@@ -30514,13 +30602,6 @@ async function postReview(octokit, repo, prNumber, headSha, body, inlines) {
             core.warning(`inline 评论失败，跳过该条：${e.message}`);
         }
     }
-    await octokit.rest.pulls.createReview({
-        ...repo,
-        pull_number: prNumber,
-        body,
-        event: "COMMENT",
-        commit_id: headSha,
-    });
 }
 // ── 入口 ──
 async function main() {
@@ -30540,18 +30621,8 @@ async function main() {
     core.info(`评审 ${ctx.repo.owner}/${ctx.repo.repo} PR #${pr.number}，diff ${diff.length} 字符，模型 ${LLM_MODEL}`);
     const content = await callLlm(diff);
     const { summary, inlines, bodyItems } = (0, logic_1.parseReviews)(content, fileLines);
-    if (!summary && !inlines.length && !bodyItems.length) {
-        core.info("模型未输出评审意见");
-        return;
-    }
-    let body = `${T.reviewTitle}\n\n${T.summaryHeading}\n${summary || T.noIssues}`;
-    if (bodyItems.length) {
-        body += `\n\n${T.othersHeading}\n` + bodyItems.join("\n");
-    }
-    if (body.length > MAX_BODY_CHARS) {
-        core.info(`评审内容过长（${body.length} 字符），截断`);
-        body = body.slice(0, MAX_BODY_CHARS) + `\n\n${T.truncated}`;
-    }
+    // 空结果也发布「未发现问题」并替换旧评审，避免上一轮的意见残留误导
+    const body = (0, logic_1.buildReviewBody)({ summary, bodyItems, model: LLM_MODEL }, LANGUAGE, MAX_BODY_CHARS);
     await postReview(octokit, repo, pr.number, pr.head.sha, body, inlines);
     core.info("评审已发布");
 }
@@ -30568,12 +30639,13 @@ main().catch((e) => {
 "use strict";
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.LlmHttpError = exports.I18N = void 0;
+exports.LlmHttpError = exports.REVIEW_MARKER = exports.I18N = void 0;
 exports.isIgnored = isIgnored;
 exports.addedLines = addedLines;
 exports.extractJson = extractJson;
 exports.parseReviews = parseReviews;
 exports.buildPrompt = buildPrompt;
+exports.buildReviewBody = buildReviewBody;
 exports.isRetryableLlmError = isRetryableLlmError;
 const minimatch_1 = __nccwpck_require__(7414);
 // ── i18n 文案 ──
@@ -30592,6 +30664,7 @@ exports.I18N = {
         severities: "严重|中等|轻微",
         langHint: "用中文输出。",
         diffIntro: "以下是 PR diff：",
+        customIntro: "仓库自定义审查要求（优先级高于以上通用规则）：",
         reviewTitle: "### AI Code Review",
         summaryHeading: "## 评审结论",
         othersHeading: "## 其他问题",
@@ -30613,6 +30686,7 @@ exports.I18N = {
         severities: "critical|major|minor",
         langHint: "Output in English.",
         diffIntro: "PR diff:",
+        customIntro: "Repository-specific review requirements (take precedence over the generic rules above):",
         reviewTitle: "### AI Code Review",
         summaryHeading: "## Summary",
         othersHeading: "## Other Issues",
@@ -30704,8 +30778,8 @@ function parseReviews(content, fileLines) {
     }
     return { summary, inlines, bodyItems };
 }
-/** 构造评审 prompt：系统角色 + JSON 格式约束 + diff 数据 */
-function buildPrompt(diff, lang) {
+/** 构造评审 prompt：系统角色 + JSON 格式约束 + 可选自定义规则 + diff 数据 */
+function buildPrompt(diff, lang, customInstructions = "") {
     const t = exports.I18N[lang] ?? exports.I18N.zh;
     const fmt = `{"summary": "one-sentence overall conclusion", ` +
         `"reviews": [{"path": "relative file path", ` +
@@ -30714,7 +30788,27 @@ function buildPrompt(diff, lang) {
     const rules = "line must be the target-file line number of a + added line in the diff; " +
         "omit line when unsure.\n" +
         "If there are no issues, reviews is an empty array.\n";
-    return t.promptIntro + fmt + rules + t.langHint + `\n\n${t.diffIntro}\n\n${diff}`;
+    const custom = customInstructions.trim()
+        ? `\n${t.customIntro}\n${customInstructions.trim()}\n`
+        : "";
+    return t.promptIntro + fmt + rules + t.langHint + custom + `\n\n${t.diffIntro}\n\n${diff}`;
+}
+/** 嵌入评审 body 的隐藏标记，用于识别并清理 inori 的旧评审（多次 push 去重） */
+exports.REVIEW_MARKER = "<!-- inori-review -->";
+/**
+ * 组装评审 body：标题（含模型名）+ 结论 + 其他问题清单。
+ * 截断发生在追加标记之前，保证标记不被截掉，下一轮才能识别清理。
+ */
+function buildReviewBody(opts, lang, maxBodyChars) {
+    const t = exports.I18N[lang] ?? exports.I18N.zh;
+    let body = `${t.reviewTitle} · ${opts.model}\n\n${t.summaryHeading}\n${opts.summary || t.noIssues}`;
+    if (opts.bodyItems.length) {
+        body += `\n\n${t.othersHeading}\n` + opts.bodyItems.join("\n");
+    }
+    if (body.length > maxBodyChars) {
+        body = body.slice(0, maxBodyChars) + `\n\n${t.truncated}`;
+    }
+    return body + `\n\n${exports.REVIEW_MARKER}`;
 }
 // ── LLM 调用错误分类（纯逻辑，供 index.ts 做重试决策）──
 /** LLM HTTP 错误，携带状态码用于重试决策 */

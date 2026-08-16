@@ -44,6 +44,7 @@ export const I18N = {
     severities: "严重|中等|轻微",
     langHint: "用中文输出。",
     diffIntro: "以下是 PR diff：",
+    customIntro: "仓库自定义审查要求（优先级高于以上通用规则）：",
     reviewTitle: "### AI Code Review",
     summaryHeading: "## 评审结论",
     othersHeading: "## 其他问题",
@@ -66,6 +67,7 @@ export const I18N = {
     severities: "critical|major|minor",
     langHint: "Output in English.",
     diffIntro: "PR diff:",
+    customIntro: "Repository-specific review requirements (take precedence over the generic rules above):",
     reviewTitle: "### AI Code Review",
     summaryHeading: "## Summary",
     othersHeading: "## Other Issues",
@@ -163,8 +165,8 @@ export function parseReviews(
   return { summary, inlines, bodyItems };
 }
 
-/** 构造评审 prompt：系统角色 + JSON 格式约束 + diff 数据 */
-export function buildPrompt(diff: string, lang: Lang): string {
+/** 构造评审 prompt：系统角色 + JSON 格式约束 + 可选自定义规则 + diff 数据 */
+export function buildPrompt(diff: string, lang: Lang, customInstructions = ""): string {
   const t = I18N[lang] ?? I18N.zh;
   const fmt =
     `{"summary": "one-sentence overall conclusion", ` +
@@ -175,7 +177,33 @@ export function buildPrompt(diff: string, lang: Lang): string {
     "line must be the target-file line number of a + added line in the diff; " +
     "omit line when unsure.\n" +
     "If there are no issues, reviews is an empty array.\n";
-  return t.promptIntro + fmt + rules + t.langHint + `\n\n${t.diffIntro}\n\n${diff}`;
+  const custom = customInstructions.trim()
+    ? `\n${t.customIntro}\n${customInstructions.trim()}\n`
+    : "";
+  return t.promptIntro + fmt + rules + t.langHint + custom + `\n\n${t.diffIntro}\n\n${diff}`;
+}
+
+/** 嵌入评审 body 的隐藏标记，用于识别并清理 inori 的旧评审（多次 push 去重） */
+export const REVIEW_MARKER = "<!-- inori-review -->";
+
+/**
+ * 组装评审 body：标题（含模型名）+ 结论 + 其他问题清单。
+ * 截断发生在追加标记之前，保证标记不被截掉，下一轮才能识别清理。
+ */
+export function buildReviewBody(
+  opts: { summary: string; bodyItems: string[]; model: string },
+  lang: Lang,
+  maxBodyChars: number
+): string {
+  const t = I18N[lang] ?? I18N.zh;
+  let body = `${t.reviewTitle} · ${opts.model}\n\n${t.summaryHeading}\n${opts.summary || t.noIssues}`;
+  if (opts.bodyItems.length) {
+    body += `\n\n${t.othersHeading}\n` + opts.bodyItems.join("\n");
+  }
+  if (body.length > maxBodyChars) {
+    body = body.slice(0, maxBodyChars) + `\n\n${t.truncated}`;
+  }
+  return body + `\n\n${REVIEW_MARKER}`;
 }
 
 // ── LLM 调用错误分类（纯逻辑，供 index.ts 做重试决策）──
