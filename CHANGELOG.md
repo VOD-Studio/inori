@@ -5,7 +5,6 @@
 
 ### 修复
 
-* **ci:** 修复 major 浮动 tag 的重复 v 前缀 ([2fb8f26](https://github.com/VOD-Studio/inori/commit/2fb8f264636b602fd338fbb4f303af066347a80d))
 * **ci:** 修复 major 浮动 tag 的重复 v 前缀 ([3c3a35e](https://github.com/VOD-Studio/inori/commit/3c3a35edb3b5513cfb8c5a2f6d44bb22c171b05d))
 
 ## [0.2.1](https://github.com/VOD-Studio/inori/compare/v0.2.0...v0.2.1) (2026-08-18)
@@ -13,7 +12,6 @@
 
 ### 修复
 
-* **ci:** 修复发版链路的 manifest 格式冲突与浮动 tag 缺失 ([c1984f8](https://github.com/VOD-Studio/inori/commit/c1984f8c1838e96d6a4fa40157b200f80ec12608))
 * **ci:** 修复发版链路的 manifest 格式冲突与浮动 tag 缺失 ([e983a6a](https://github.com/VOD-Studio/inori/commit/e983a6a7a57ff91352cd4246ca4b80a2bc48cbbc))
 
 ## [0.2.0](https://github.com/VOD-Studio/inori/compare/v0.1.0...v0.2.0) (2026-08-18)
@@ -26,7 +24,6 @@
 * 增加收口纪律、diff安全截断、配置文件解析与智能早退纯逻辑 ([25740a6](https://github.com/VOD-Studio/inori/commit/25740a6d4e049ffaf669387cd922307804ed48cf))
 * 支持 Coding Plan 套餐端点（qwen-coding / glm-coding） ([3187a44](https://github.com/VOD-Studio/inori/commit/3187a44d6bf485276585caedef7681ecea6c54bc))
 * 支持主流大模型配置自动识别、Coding Plan 深度集成与完全自定义 ([b7a4f0b](https://github.com/VOD-Studio/inori/commit/b7a4f0b59a8eb697bf2678fd39a0b2ce3aef07bf))
-* 支持主流大模型配置自动识别、Coding Plan 深度集成与完全自定义 ([74eab19](https://github.com/VOD-Studio/inori/commit/74eab199e616372fcb21887cec7d0fa50302b930))
 * 新增 Gemini 与 Grok 预设（对照 omp 内置目录补缺口） ([03e855d](https://github.com/VOD-Studio/inori/commit/03e855da59c78da78072fb894dc5fbe2cb9be7f3))
 * 补齐全部订阅套餐预设（doubao-coding / minimax-token） ([0d0f963](https://github.com/VOD-Studio/inori/commit/0d0f963afe3db4652b39b7bbf2ab3af691840b20))
 * 评审更新复用去重（标记清理旧评论+原地更新汇总）、模型名入标题、custom_instructions 输入 ([b78a8ff](https://github.com/VOD-Studio/inori/commit/b78a8ffcebd3dd4438096696997002e654f0700e))
