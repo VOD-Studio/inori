@@ -30337,7 +30337,7 @@ function wrappy (fn, cb) {
 
 /***/ }),
 
-/***/ 6866:
+/***/ 5478:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
 "use strict";
@@ -30376,337 +30376,16 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-const fs = __importStar(__nccwpck_require__(9896));
-const path = __importStar(__nccwpck_require__(6928));
+exports.readActionInputs = readActionInputs;
 const core = __importStar(__nccwpck_require__(6966));
-const github = __importStar(__nccwpck_require__(4903));
-const logic_1 = __nccwpck_require__(9256);
-// ── 配置读取 ──
-function loadRepoConfigFile(workspaceDir = process.cwd()) {
-    const candidateFiles = [
-        path.join(workspaceDir, ".github", "inori.yml"),
-        path.join(workspaceDir, ".github", "inori.yaml"),
-    ];
-    for (const filePath of candidateFiles) {
-        if (fs.existsSync(filePath)) {
-            try {
-                core.info(`读取仓库配置文件：${filePath}`);
-                const content = fs.readFileSync(filePath, "utf-8");
-                return (0, logic_1.parseConfigFile)(content);
-            }
-            catch (e) {
-                core.warning(`解析配置文件 ${filePath} 失败：${e.message}`);
-            }
-        }
-    }
-    return {};
-}
-const LLM_ENDPOINT = core.getInput("llm_endpoint", { required: true }).replace(/\/+$/, "");
-const LLM_MODEL = core.getInput("llm_model", { required: true });
-const LLM_API_KEY = core.getInput("llm_api_key", { required: true });
-const GITHUB_TOKEN = core.getInput("github_token", { required: true });
-// 单次 LLM 调用 5 分钟上限，端点挂起时及时中止而不是卡满整个 job
-const LLM_TIMEOUT_MS = 300_000;
-// 429/5xx/超时/网络错误的退避重试次数
-const MAX_LLM_RETRIES = 3;
-// ── IO：拉取 diff ──
-/**
- * 分页拉取 PR 全部文件（GitHub API 单页上限 100），经过过滤与安全文件块截断，
- * 返回 diff 文本与各文件新增行号集合（用于 inline 锚点校验）。
- */
-async function getPrDiff(octokit, repo, prNumber, config) {
-    const fileLines = new Map();
-    const validFiles = [];
-    let page = 1;
-    let files = [];
-    do {
-        const resp = await octokit.rest.pulls.listFiles({
-            ...repo,
-            pull_number: prNumber,
-            per_page: 100,
-            page,
-        });
-        files = resp.data;
-        for (const f of files) {
-            if ((0, logic_1.isIgnored)(f.filename, config.ignorePatterns)) {
-                core.info(`忽略 ${f.filename}`);
-                continue;
-            }
-            const patch = f.patch ?? "";
-            if (!patch)
-                continue;
-            validFiles.push({ filename: f.filename, patch });
-        }
-        page += 1;
-    } while (files.length === 100);
-    const truncatedResult = (0, logic_1.formatDiffAndTruncate)(validFiles, config.maxDiffChars, config.language);
-    if (truncatedResult.truncated) {
-        core.info(`diff 过大，已按文件块安全截断到 ${config.maxDiffChars} 字符以内（略去后续 ${truncatedResult.omittedCount} 个文件）`);
-    }
-    // 仅对被保留在 diff 中的文件建立行号映射
-    const includedSet = new Set(truncatedResult.includedFiles);
-    for (const f of validFiles) {
-        if (includedSet.has(f.filename)) {
-            fileLines.set(f.filename, (0, logic_1.addedLines)(f.patch));
-        }
-    }
-    return { diff: truncatedResult.diff, fileLines };
-}
-// ── IO：调用 LLM ──
-/** 单次调用 OpenAI 兼容的 /chat/completions 接口，非 2xx 抛 LlmHttpError */
-async function chatCompletions(body) {
-    const resp = await fetch(`${LLM_ENDPOINT}/chat/completions`, {
-        method: "POST",
-        headers: {
-            Authorization: `Bearer ${LLM_API_KEY}`,
-            "Content-Type": "application/json",
-        },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(LLM_TIMEOUT_MS),
-    });
-    if (!resp.ok) {
-        const detail = (await resp.text()).slice(0, 200);
-        throw new logic_1.LlmHttpError(resp.status, detail);
-    }
-    const data = (await resp.json());
-    const content = data.choices?.[0]?.message?.content;
-    if (!content) {
-        throw new Error(`LLM 响应结构异常: ${JSON.stringify(data).slice(0, 300)}`);
-    }
-    return content.trim();
-}
-/**
- * 调用 LLM：
- * - 部分兼容端点不支持 response_format（通常报 400），自动去掉该参数重试一次；
- * - 429/5xx/超时/网络错误按指数退避重试，最多 MAX_LLM_RETRIES 次。
- */
-async function callLlm(diff, config) {
-    const prompt = (0, logic_1.buildPrompt)(diff, config.language, config.customInstructions);
-    const body = {
-        model: LLM_MODEL,
-        messages: [{ role: "user", content: prompt }],
-        temperature: 0.3,
-        response_format: { type: "json_object" },
-    };
-    let droppedResponseFormat = false;
-    let attempt = 0;
-    for (;;) {
-        try {
-            return await chatCompletions(body);
-        }
-        catch (e) {
-            if (e instanceof logic_1.LlmHttpError && e.status === 400 && !droppedResponseFormat) {
-                droppedResponseFormat = true;
-                delete body.response_format;
-                core.warning("端点可能不支持 response_format，已去掉该参数重试");
-                continue;
-            }
-            attempt += 1;
-            if (attempt > MAX_LLM_RETRIES || !(0, logic_1.isRetryableLlmError)(e))
-                throw e;
-            const delayMs = 1000 * 2 ** attempt;
-            core.warning(`LLM 调用失败：${e.message}，${delayMs / 1000}s 后重试（${attempt}/${MAX_LLM_RETRIES}）`);
-            await new Promise((resolve) => setTimeout(resolve, delayMs));
-        }
-    }
-}
-// ── IO：发布评审 ──
-/**
- * 删除上一轮 inori 的 inline 评论（body 内嵌标记识别）。
- * 有人回复过的线程跳过，不破坏人工讨论。
- */
-async function deleteOldInlineComments(octokit, repo, prNumber) {
-    const all = [];
-    let page = 1;
-    let comments = [];
-    do {
-        const resp = await octokit.rest.pulls.listReviewComments({
-            ...repo,
-            pull_number: prNumber,
-            per_page: 100,
-            page,
-        });
-        comments = resp.data;
-        all.push(...comments);
-        page += 1;
-    } while (comments.length === 100);
-    const replied = new Set(all.filter((c) => c.in_reply_to_id).map((c) => c.in_reply_to_id));
-    for (const c of all) {
-        if (!c.body?.includes(logic_1.REVIEW_MARKER) || c.in_reply_to_id || replied.has(c.id))
-            continue;
-        try {
-            await octokit.rest.pulls.deleteReviewComment({ ...repo, comment_id: c.id });
-        }
-        catch (e) {
-            core.warning(`删除旧 inline 评论 #${c.id} 失败：${e.message}`);
-        }
-    }
-}
-/**
- * 将上一轮 inori 创建且未被人工回复的 review threads 标记为 Resolved。
- */
-async function resolveOldInlineThreads(octokit, repo, prNumber) {
-    let cursor = null;
-    let hasNextPage = true;
-    while (hasNextPage) {
-        const data = (await octokit.graphql(`
-      query($owner: String!, $repo: String!, $prNumber: Int!, $cursor: String) {
-        repository(owner: $owner, name: $repo) {
-          pullRequest(number: $prNumber) {
-            reviewThreads(first: 100, after: $cursor) {
-              pageInfo {
-                hasNextPage
-                endCursor
-              }
-              nodes {
-                id
-                isResolved
-                comments(first: 100) {
-                  nodes {
-                    id
-                    body
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    `, {
-            owner: repo.owner,
-            repo: repo.repo,
-            prNumber,
-            cursor,
-        }));
-        const threads = data.repository?.pullRequest?.reviewThreads?.nodes ?? [];
-        for (const thread of threads) {
-            if (thread.isResolved)
-                continue;
-            const comments = thread.comments?.nodes ?? [];
-            if (comments.length === 0)
-                continue;
-            const firstComment = comments[0];
-            if (firstComment.body.includes(logic_1.REVIEW_MARKER) && comments.length === 1) {
-                try {
-                    await octokit.graphql(`
-            mutation($threadId: ID!) {
-              resolveReviewThread(input: { threadId: $threadId }) {
-                thread {
-                  id
-                  isResolved
-                }
-              }
-            }
-          `, { threadId: thread.id });
-                    core.info(`已将历史评审线程 ${thread.id} 标记为已解决 (Resolved)`);
-                }
-                catch (e) {
-                    core.warning(`标记评审线程 ${thread.id} 已解决失败：${e.message}`);
-                }
-            }
-        }
-        const pageInfo = data.repository?.pullRequest?.reviewThreads?.pageInfo;
-        hasNextPage = pageInfo?.hasNextPage ?? false;
-        cursor = pageInfo?.endCursor ?? null;
-    }
-}
-/** 找到最近一轮 inori 评审的 id（body 内嵌标记识别），无则返回 null */
-async function findOldReviewId(octokit, repo, prNumber) {
-    let target = null;
-    let page = 1;
-    let reviews = [];
-    do {
-        const resp = await octokit.rest.pulls.listReviews({
-            ...repo,
-            pull_number: prNumber,
-            per_page: 100,
-            page,
-        });
-        reviews = resp.data;
-        // 列表按提交时间升序，持续覆盖取最后一个命中的
-        for (const rv of reviews) {
-            if (rv.body?.includes(logic_1.REVIEW_MARKER))
-                target = rv.id;
-        }
-        page += 1;
-    } while (reviews.length === 100);
-    return target;
-}
-/**
- * 发布评审（更新复用模式）：GitHub REST 无法删除已提交的 review，
- * 因此汇总 body 复用同一轮评审（updateReview 原地更新），inline 评论
- * 先删旧的再逐条发新的（每条内嵌标记供下轮识别清理），多次 push 不堆叠。
- */
-async function postReview(octokit, repo, prNumber, headSha, body, inlines, onUpdate) {
-    if (onUpdate === "replace") {
-        try {
-            await deleteOldInlineComments(octokit, repo, prNumber);
-        }
-        catch (e) {
-            core.warning(`清理旧 inline 评论失败，继续发布：${e.message}`);
-        }
-    }
-    else if (onUpdate === "resolve") {
-        try {
-            await resolveOldInlineThreads(octokit, repo, prNumber);
-        }
-        catch (e) {
-            core.warning(`解决旧 inline 评审线程失败，继续发布：${e.message}`);
-        }
-    }
-    let posted = false;
-    try {
-        const oldId = await findOldReviewId(octokit, repo, prNumber);
-        if (oldId !== null) {
-            await octokit.rest.pulls.updateReview({
-                ...repo,
-                pull_number: prNumber,
-                review_id: oldId,
-                body,
-            });
-            posted = true;
-        }
-    }
-    catch (e) {
-        core.warning(`更新旧评审失败，改为新建：${e.message}`);
-    }
-    if (!posted) {
-        await octokit.rest.pulls.createReview({
-            ...repo,
-            pull_number: prNumber,
-            body,
-            event: "COMMENT",
-            commit_id: headSha,
-        });
-    }
-    // inline 逐条发布，单条失败只跳过该条；汇总 body 已覆盖整体结论
-    for (const ic of inlines) {
-        try {
-            await octokit.rest.pulls.createReviewComment({
-                ...repo,
-                pull_number: prNumber,
-                body: `${ic.body}\n\n${logic_1.REVIEW_MARKER}`,
-                path: ic.path,
-                line: ic.line,
-                commit_id: headSha,
-            });
-            core.info(`inline 评论: ${ic.path}:${ic.line}`);
-        }
-        catch (e) {
-            core.warning(`inline 评论失败，跳过该条：${e.message}`);
-        }
-    }
-}
-// ── 入口 ──
-async function main() {
-    const ctx = github.context;
-    if (!ctx.payload.pull_request) {
-        core.setFailed("非 pull_request 事件，跳过");
-        return;
-    }
-    const pr = ctx.payload.pull_request;
-    const fileConfig = loadRepoConfigFile();
-    const config = (0, logic_1.resolveConfig)({
+// ── Action Inputs 读取 ──
+// GitHub Actions runner 对 action.yml 声明了 default 的 input 会注入
+// INPUT_* 环境变量（即使 workflow 未显式传参），因此这里约定：
+// 可选 input 在 action.yml 中不设 default，runner 注入空串，
+// 空串一律视为「未设置」，让配置文件与 DEFAULTS 有机会生效。
+/** 读取全部评审相关 inputs（必填的 llm_* 与 github_token 不在此列） */
+function readActionInputs() {
+    return {
         language: core.getInput("language"),
         ignore_patterns: core.getInput("ignore_patterns"),
         custom_instructions: core.getInput("custom_instructions"),
@@ -30717,43 +30396,139 @@ async function main() {
         skip_draft: core.getInput("skip_draft"),
         ignore_bots: core.getInput("ignore_bots"),
         ignore_authors: core.getInput("ignore_authors"),
-    }, fileConfig);
-    // 智能早退检查（草稿 PR、Bot PR、忽略作者）
-    const skipCheck = (0, logic_1.shouldSkipReview)({
-        isDraft: pr.draft,
-        skipDraft: config.skipDraft,
-        author: pr.user,
-        ignoreBots: config.ignoreBots,
-        ignoreAuthors: config.ignoreAuthors,
-        lang: config.language,
-    });
-    if (skipCheck.skip) {
-        core.info(skipCheck.reason ?? "跳过评审");
-        return;
-    }
-    const octokit = github.getOctokit(GITHUB_TOKEN);
-    const repo = { owner: ctx.repo.owner, repo: ctx.repo.repo };
-    const { diff, fileLines } = await getPrDiff(octokit, repo, pr.number, config);
-    if (!diff || diff.trim().length === 0) {
-        core.info("无有效代码变更需评审");
-        return;
-    }
-    core.info(`评审 ${ctx.repo.owner}/${ctx.repo.repo} PR #${pr.number}，diff ${diff.length} 字符，模型 ${LLM_MODEL}`);
-    const content = await callLlm(diff, config);
-    const { summary, inlines, bodyItems } = (0, logic_1.parseReviews)(content, fileLines);
-    // 空结果也发布「未发现问题」并替换/更新旧评审，避免上一轮的意见残留误导
-    const body = (0, logic_1.buildReviewBody)({ summary, bodyItems, model: LLM_MODEL }, config.language, config.maxBodyChars);
-    await postReview(octokit, repo, pr.number, pr.head.sha, body, inlines, config.onUpdate);
-    core.info("评审已发布");
+    };
 }
-main().catch((e) => {
-    core.setFailed(`评审失败：${e.message}`);
-});
 
 
 /***/ }),
 
-/***/ 9256:
+/***/ 7755:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.DEFAULTS = void 0;
+// ── 内置默认值（单一事实来源）──
+// action.yml 的可选 input 一律不写 default（由 runner 注入空串），
+// 默认值只在这里定义，README 与 action.yml description 照此同步。
+// 新增配置项：types.ts 加字段 → 此处加默认值 → resolve.ts 加一行合并。
+exports.DEFAULTS = {
+    language: "zh",
+    maxDiffChars: 40000,
+    maxBodyChars: 60000,
+    onUpdate: "replace",
+    skipDraft: true,
+    ignoreBots: true,
+    ignoreAuthors: [],
+    ignorePatterns: [],
+    customInstructions: "",
+};
+
+
+/***/ }),
+
+/***/ 9749:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.parseStringList = exports.resolveConfig = exports.parseConfigFile = exports.DEFAULTS = exports.ON_UPDATE_VALUES = void 0;
+exports.loadConfig = loadConfig;
+const actionInputs_1 = __nccwpck_require__(5478);
+const repoConfig_1 = __nccwpck_require__(4107);
+const resolve_1 = __nccwpck_require__(3413);
+// ── 配置层对外唯一入口 ──
+// 调用方（index.ts）只需要 loadConfig()：背后是
+// action inputs 读取 → 仓库配置文件读取 → 三层合并。
+/** 读取并合并全部配置（Action Inputs > .github/inori.yml > DEFAULTS） */
+function loadConfig() {
+    return (0, resolve_1.resolveConfig)((0, actionInputs_1.readActionInputs)(), (0, repoConfig_1.loadRepoConfigFile)());
+}
+var types_1 = __nccwpck_require__(2656);
+Object.defineProperty(exports, "ON_UPDATE_VALUES", ({ enumerable: true, get: function () { return types_1.ON_UPDATE_VALUES; } }));
+var defaults_1 = __nccwpck_require__(7755);
+Object.defineProperty(exports, "DEFAULTS", ({ enumerable: true, get: function () { return defaults_1.DEFAULTS; } }));
+var resolve_2 = __nccwpck_require__(3413);
+Object.defineProperty(exports, "parseConfigFile", ({ enumerable: true, get: function () { return resolve_2.parseConfigFile; } }));
+Object.defineProperty(exports, "resolveConfig", ({ enumerable: true, get: function () { return resolve_2.resolveConfig; } }));
+Object.defineProperty(exports, "parseStringList", ({ enumerable: true, get: function () { return resolve_2.parseStringList; } }));
+
+
+/***/ }),
+
+/***/ 4107:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.loadRepoConfigFile = loadRepoConfigFile;
+const fs = __importStar(__nccwpck_require__(9896));
+const path = __importStar(__nccwpck_require__(6928));
+const core = __importStar(__nccwpck_require__(6966));
+const errors_1 = __nccwpck_require__(3113);
+const resolve_1 = __nccwpck_require__(3413);
+// ── 仓库级配置文件（.github/inori.yml | .yaml）──
+const CONFIG_CANDIDATES = ["inori.yml", "inori.yaml"];
+/**
+ * 依次尝试读取 workspace 下的 .github/inori.yml / inori.yaml，
+ * 不存在返回空对象；解析失败告警并返回空对象（不阻断评审）。
+ */
+function loadRepoConfigFile(workspaceDir = process.cwd()) {
+    for (const name of CONFIG_CANDIDATES) {
+        const filePath = path.join(workspaceDir, ".github", name);
+        if (!fs.existsSync(filePath))
+            continue;
+        try {
+            core.info(`读取仓库配置文件：${filePath}`);
+            return (0, resolve_1.parseConfigFile)(fs.readFileSync(filePath, "utf-8"));
+        }
+        catch (e) {
+            core.warning(`解析配置文件 ${filePath} 失败：${(0, errors_1.errMsg)(e)}`);
+        }
+    }
+    return {};
+}
+
+
+/***/ }),
+
+/***/ 3413:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
 "use strict";
@@ -30762,22 +30537,154 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.LlmHttpError = exports.REVIEW_MARKER = exports.I18N = exports.DEFAULT_IGNORE_PATTERNS = void 0;
-exports.isIgnored = isIgnored;
-exports.addedLines = addedLines;
-exports.extractJson = extractJson;
-exports.parseReviews = parseReviews;
-exports.buildPrompt = buildPrompt;
-exports.buildReviewBody = buildReviewBody;
-exports.isRetryableLlmError = isRetryableLlmError;
-exports.formatDiffAndTruncate = formatDiffAndTruncate;
 exports.parseConfigFile = parseConfigFile;
 exports.parseStringList = parseStringList;
 exports.resolveConfig = resolveConfig;
-exports.shouldSkipReview = shouldSkipReview;
-const minimatch_1 = __nccwpck_require__(7414);
 const yaml_1 = __importDefault(__nccwpck_require__(84));
+const defaults_1 = __nccwpck_require__(7755);
+const diff_1 = __nccwpck_require__(353);
+const types_1 = __nccwpck_require__(2656);
+// ── 配置文件解析与三层合并 ──
+// 优先级：Action Inputs（显式传入）> 配置文件 > DEFAULTS。
+/** 解析 YAML 配置文件内容；非法内容容错返回空对象 */
+function parseConfigFile(content) {
+    try {
+        const parsed = yaml_1.default.parse(content);
+        if (!parsed || typeof parsed !== "object")
+            return {};
+        return parsed;
+    }
+    catch {
+        return {};
+    }
+}
+/** 字符串或数组统一拆为去空白后的非空列表 */
+function parseStringList(val) {
+    if (!val)
+        return [];
+    if (Array.isArray(val)) {
+        return val.map((s) => String(s).trim()).filter(Boolean);
+    }
+    return String(val)
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+}
+// —— 字段级合并 helpers：input 显式值 > 文件值 > 默认值 ——
+/** input 非空白则用之，否则文件值，再否则默认值 */
+function strField(raw, file, def) {
+    return raw.trim() !== "" ? raw : (file ?? def);
+}
+/** input 恒为字符串："true"→true，"false"→false，其余值（含空）落到文件/默认 */
+function boolField(raw, file, def) {
+    const v = raw.trim().toLowerCase();
+    if (v === "true")
+        return true;
+    if (v === "false")
+        return false;
+    return file ?? def;
+}
+/** input 是可解析整数则用之，否则文件值（须为数字），再否则默认值 */
+function intField(raw, file, def) {
+    const v = raw.trim();
+    if (v !== "") {
+        const n = parseInt(v, 10);
+        if (!isNaN(n))
+            return n;
+    }
+    return typeof file === "number" ? file : def;
+}
+/** input 是合法枚举值则用之，否则文件值（归一后校验），再否则默认值 */
+function enumField(raw, allowed, file, def) {
+    const normalize = (v) => {
+        const n = v.trim().toLowerCase();
+        return allowed.includes(n) ? n : null;
+    };
+    if (raw.trim() !== "") {
+        const n = normalize(raw);
+        if (n !== null)
+            return n;
+    }
+    if (file !== undefined) {
+        const n = normalize(String(file));
+        if (n !== null)
+            return n;
+    }
+    return def;
+}
+/** 列表：input 非空列表优先，否则文件列表（默认值由调用方决定拼接方式） */
+function listField(raw, file) {
+    const fromInput = parseStringList(raw);
+    return fromInput.length > 0 ? fromInput : parseStringList(file);
+}
+/**
+ * 合并三层配置为最终生效值。
+ * 规则见文件头注释；onUpdate 额外兼容 legacy 开关 keep_previous_comments
+ * （仅在 on_update 未显式给出时生效）。
+ */
+function resolveConfig(inputs, fileConfig = {}) {
+    // language
+    const language = enumField(inputs.language, ["zh", "en"], fileConfig.language, defaults_1.DEFAULTS.language);
+    // ignorePatterns: 内置默认 + 用户显式追加（input 优先于文件）
+    const extraPatterns = listField(inputs.ignore_patterns, fileConfig.ignore_patterns);
+    const ignorePatterns = Array.from(new Set([...diff_1.DEFAULT_IGNORE_PATTERNS, ...extraPatterns]));
+    // customInstructions: 非空 input > 文件 > 空
+    const customInstructions = strField(inputs.custom_instructions, fileConfig.custom_instructions, defaults_1.DEFAULTS.customInstructions);
+    const maxDiffChars = intField(inputs.max_diff_chars, fileConfig.max_diff_chars, defaults_1.DEFAULTS.maxDiffChars);
+    const maxBodyChars = intField(inputs.max_body_chars, fileConfig.max_body_chars, defaults_1.DEFAULTS.maxBodyChars);
+    // onUpdate: on_update 显式 > keep_previous_comments legacy > 文件 > 默认
+    let onUpdate = enumField(inputs.on_update, types_1.ON_UPDATE_VALUES, fileConfig.on_update, defaults_1.DEFAULTS.onUpdate);
+    if (inputs.on_update.trim() === "") {
+        const legacyInput = inputs.keep_previous_comments.trim().toLowerCase() === "true";
+        const legacyFile = fileConfig.keep_previous_comments === true;
+        if (legacyInput || legacyFile)
+            onUpdate = "keep";
+    }
+    const skipDraft = boolField(inputs.skip_draft, fileConfig.skip_draft, defaults_1.DEFAULTS.skipDraft);
+    const ignoreBots = boolField(inputs.ignore_bots, fileConfig.ignore_bots, defaults_1.DEFAULTS.ignoreBots);
+    const ignoreAuthors = listField(inputs.ignore_authors, fileConfig.ignore_authors);
+    return {
+        language,
+        ignorePatterns,
+        customInstructions,
+        maxDiffChars,
+        maxBodyChars,
+        onUpdate,
+        skipDraft,
+        ignoreBots,
+        ignoreAuthors,
+    };
+}
+
+
+/***/ }),
+
+/***/ 2656:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.ON_UPDATE_VALUES = void 0;
+exports.ON_UPDATE_VALUES = ["replace", "resolve", "keep"];
+
+
+/***/ }),
+
+/***/ 353:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.DEFAULT_IGNORE_PATTERNS = void 0;
+exports.isIgnored = isIgnored;
+exports.addedLines = addedLines;
+exports.formatDiffAndTruncate = formatDiffAndTruncate;
+const minimatch_1 = __nccwpck_require__(7414);
+const i18n_1 = __nccwpck_require__(618);
 // ── 默认忽略模式（常见锁文件、压缩产物、矢量图、发布清单）──
+// 与 DEFAULTS 一起构成内置默认值，用户通过 ignore_patterns 追加而非覆盖。
 exports.DEFAULT_IGNORE_PATTERNS = [
     // 锁文件
     "pnpm-lock.yaml",
@@ -30797,7 +30704,132 @@ exports.DEFAULT_IGNORE_PATTERNS = [
     "CHANGELOG.md",
     ".release-please-manifest.json",
 ];
-// ── i18n 文案 ──
+/** 判断文件是否匹配忽略模式（支持裸文件名与目录内 glob） */
+function isIgnored(path, patterns) {
+    return patterns.some((p) => path === p || (0, minimatch_1.minimatch)(path, p) || (0, minimatch_1.minimatch)(path, `**/${p}`));
+}
+/**
+ * 解析 patch，返回新增行（+ 行）在目标文件里的行号集合。
+ * 用于校验 inline 锚点合法性——评论只能落在真实存在的行上。
+ */
+function addedLines(patch) {
+    const lines = new Set();
+    let cur = null;
+    for (const line of patch.split("\n")) {
+        const m = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+        if (m) {
+            cur = parseInt(m[1], 10);
+            continue;
+        }
+        // 文件头形如 "+++ b/path"（带空格），需跳过
+        if (line.startsWith("+++ ") || line.startsWith("--- "))
+            continue;
+        if (line.startsWith("+") && cur !== null) {
+            lines.add(cur);
+            cur += 1;
+        }
+        else if (line.startsWith("-")) {
+            continue;
+        }
+        else if (!line.startsWith("\\") && cur !== null) {
+            cur += 1;
+        }
+    }
+    return lines;
+}
+/**
+ * 组装 PR diff 并按文件块安全截断。
+ * 每个文件以 `--- filename` 头开始，超过 maxDiffChars 时回退到上一个
+ * 完整文件块边界截断（保证送入 LLM 的 patch 语法完整），并追加提示信息。
+ */
+function formatDiffAndTruncate(files, maxDiffChars, lang = "zh") {
+    const table = (0, i18n_1.t)(lang);
+    const validFiles = files.filter((f) => f.patch && f.patch.trim().length > 0);
+    if (validFiles.length === 0) {
+        return { diff: "", truncated: false, omittedCount: 0, includedFiles: [] };
+    }
+    const chunks = [];
+    const includedFiles = [];
+    let currentLen = 0;
+    let truncated = false;
+    let omittedCount = 0;
+    for (let i = 0; i < validFiles.length; i++) {
+        const f = validFiles[i];
+        const chunk = `--- ${f.filename}\n${f.patch}`;
+        const nextLen = chunks.length === 0 ? chunk.length : currentLen + 1 + chunk.length;
+        if (chunks.length > 0 && nextLen > maxDiffChars) {
+            truncated = true;
+            omittedCount = validFiles.length - i;
+            break;
+        }
+        chunks.push(chunk);
+        includedFiles.push(f.filename);
+        currentLen = nextLen;
+        if (currentLen >= maxDiffChars && i < validFiles.length - 1) {
+            truncated = true;
+            omittedCount = validFiles.length - (i + 1);
+            break;
+        }
+    }
+    let diff = chunks.join("\n");
+    if (truncated && omittedCount > 0) {
+        diff += `\n\n${table.diffTruncated(omittedCount)}`;
+    }
+    return { diff, truncated, omittedCount, includedFiles };
+}
+
+
+/***/ }),
+
+/***/ 3113:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+// ── 错误分类与通用错误工具 ──
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.LlmHttpError = void 0;
+exports.isRetryableLlmError = isRetryableLlmError;
+exports.errMsg = errMsg;
+/** LLM HTTP 错误，携带状态码用于重试决策 */
+class LlmHttpError extends Error {
+    status;
+    constructor(status, detail) {
+        super(`LLM HTTP ${status}: ${detail}`);
+        this.status = status;
+        this.name = "LlmHttpError";
+    }
+}
+exports.LlmHttpError = LlmHttpError;
+/** 可重试的错误：429/5xx、网络层失败（TypeError）、超时/中止 */
+function isRetryableLlmError(e) {
+    if (e instanceof LlmHttpError)
+        return e.status === 429 || e.status >= 500;
+    if (e instanceof TypeError)
+        return true;
+    return e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError");
+}
+/** 安全提取任意抛出值的 message（替代 `(e as Error).message` 散写） */
+function errMsg(e) {
+    if (e instanceof Error)
+        return e.message;
+    return String(e);
+}
+
+
+/***/ }),
+
+/***/ 618:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+// ── i18n 文案表 ──
+// 纯数据模块：所有用户可见文案的唯一来源。新增语言时在此加表，
+// Lang 类型随 keyof 自动扩展。
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.I18N = void 0;
+exports.t = t;
 exports.I18N = {
     zh: {
         promptIntro: "你是资深代码评审专家。请评审以下 PR diff，重点检查：\n" +
@@ -30853,40 +30885,54 @@ exports.I18N = {
         diffTruncated: (omittedCount) => `... (due to length limit, diffs of ${omittedCount} subsequent files omitted)`,
     },
 };
-// ── 核心纯函数（无 IO 副作用，可单测）──
-/** 判断文件是否匹配忽略模式 */
-function isIgnored(path, patterns) {
-    return patterns.some((p) => path === p || (0, minimatch_1.minimatch)(path, p) || (0, minimatch_1.minimatch)(path, `**/${p}`));
+/** 取指定语言的文案表；未知语言回退中文（全模块唯一的回退点） */
+function t(lang) {
+    return (exports.I18N[lang] ?? exports.I18N.zh);
 }
-/**
- * 解析 patch，返回新增行（+ 行）在目标文件里的行号集合。
- * 用于校验 inline 锚点合法性——评论只能落在真实存在的行上。
- */
-function addedLines(patch) {
-    const lines = new Set();
-    let cur = null;
-    for (const line of patch.split("\n")) {
-        const m = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
-        if (m) {
-            cur = parseInt(m[1], 10);
-            continue;
-        }
-        // 文件头形如 "+++ b/path"（带空格），需跳过
-        if (line.startsWith("+++ ") || line.startsWith("--- "))
-            continue;
-        if (line.startsWith("+") && cur !== null) {
-            lines.add(cur);
-            cur += 1;
-        }
-        else if (line.startsWith("-")) {
-            continue;
-        }
-        else if (!line.startsWith("\\") && cur !== null) {
-            cur += 1;
-        }
-    }
-    return lines;
+
+
+/***/ }),
+
+/***/ 9080:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.buildPrompt = buildPrompt;
+const i18n_1 = __nccwpck_require__(618);
+/** 构造评审 prompt：系统角色 + JSON 格式约束 + 可选自定义规则 + diff 数据 */
+function buildPrompt(diff, lang, customInstructions = "") {
+    const table = (0, i18n_1.t)(lang);
+    const fmt = `{"summary": "one-sentence overall conclusion", ` +
+        `"reviews": [{"path": "relative file path", ` +
+        `"line": added line number, "severity": "${table.severities}", ` +
+        `"comment": "issue and suggestion"}]}\n`;
+    const rules = "line must be the target-file line number of a + added line in the diff; " +
+        "omit line when unsure.\n" +
+        "If there are no issues, reviews is an empty array.\n";
+    const custom = customInstructions.trim()
+        ? `\n${table.customIntro}\n${customInstructions.trim()}\n`
+        : "";
+    return table.promptIntro + fmt + rules + table.langHint + custom + `\n\n${table.diffIntro}\n\n${diff}`;
 }
+
+
+/***/ }),
+
+/***/ 9058:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.REVIEW_MARKER = void 0;
+exports.extractJson = extractJson;
+exports.parseReviews = parseReviews;
+exports.buildReviewBody = buildReviewBody;
+const i18n_1 = __nccwpck_require__(618);
+/** 嵌入评审 body 的隐藏标记，用于识别并清理 inori 的旧评审（多次 push 去重） */
+exports.REVIEW_MARKER = "<!-- inori-review -->";
 /**
  * 从模型输出中提取 JSON 文本。模型常无视「不要代码块」的指令，
  * 先剥离 ``` 围栏，再按最外层花括号截取（容忍围栏外的说明文字）。
@@ -30937,203 +30983,32 @@ function parseReviews(content, fileLines) {
     }
     return { summary, inlines, bodyItems };
 }
-/** 构造评审 prompt：系统角色 + JSON 格式约束 + 可选自定义规则 + diff 数据 */
-function buildPrompt(diff, lang, customInstructions = "") {
-    const t = exports.I18N[lang] ?? exports.I18N.zh;
-    const fmt = `{"summary": "one-sentence overall conclusion", ` +
-        `"reviews": [{"path": "relative file path", ` +
-        `"line": added line number, "severity": "${t.severities}", ` +
-        `"comment": "issue and suggestion"}]}\n`;
-    const rules = "line must be the target-file line number of a + added line in the diff; " +
-        "omit line when unsure.\n" +
-        "If there are no issues, reviews is an empty array.\n";
-    const custom = customInstructions.trim()
-        ? `\n${t.customIntro}\n${customInstructions.trim()}\n`
-        : "";
-    return t.promptIntro + fmt + rules + t.langHint + custom + `\n\n${t.diffIntro}\n\n${diff}`;
-}
-/** 嵌入评审 body 的隐藏标记，用于识别并清理 inori 的旧评审（多次 push 去重） */
-exports.REVIEW_MARKER = "<!-- inori-review -->";
 /**
  * 组装评审 body：标题（含模型名）+ 结论 + 其他问题清单。
  * 截断发生在追加标记之前，保证标记不被截掉，下一轮才能识别清理。
  */
 function buildReviewBody(opts, lang, maxBodyChars) {
-    const t = exports.I18N[lang] ?? exports.I18N.zh;
-    let body = `${t.reviewTitle} · ${opts.model}\n\n${t.summaryHeading}\n${opts.summary || t.noIssues}`;
+    const table = (0, i18n_1.t)(lang);
+    let body = `${table.reviewTitle} · ${opts.model}\n\n${table.summaryHeading}\n${opts.summary || table.noIssues}`;
     if (opts.bodyItems.length) {
-        body += `\n\n${t.othersHeading}\n` + opts.bodyItems.join("\n");
+        body += `\n\n${table.othersHeading}\n` + opts.bodyItems.join("\n");
     }
     if (body.length > maxBodyChars) {
-        body = body.slice(0, maxBodyChars) + `\n\n${t.truncated}`;
+        body = body.slice(0, maxBodyChars) + `\n\n${table.truncated}`;
     }
     return body + `\n\n${exports.REVIEW_MARKER}`;
 }
-// ── LLM 调用错误分类（纯逻辑，供 index.ts 做重试决策）──
-/** LLM HTTP 错误，携带状态码用于重试决策 */
-class LlmHttpError extends Error {
-    status;
-    constructor(status, detail) {
-        super(`LLM HTTP ${status}: ${detail}`);
-        this.status = status;
-        this.name = "LlmHttpError";
-    }
-}
-exports.LlmHttpError = LlmHttpError;
-/** 可重试的错误：429/5xx、网络层失败（TypeError）、超时/中止 */
-function isRetryableLlmError(e) {
-    if (e instanceof LlmHttpError)
-        return e.status === 429 || e.status >= 500;
-    if (e instanceof TypeError)
-        return true;
-    return e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError");
-}
-/**
- * 组装 PR diff 并按文件块安全截断。
- * 超过 maxDiffChars 时，回退到上一个完整的文件边界截断，并在截断处追加提示信息。
- */
-function formatDiffAndTruncate(files, maxDiffChars, lang = "zh") {
-    const t = exports.I18N[lang] ?? exports.I18N.zh;
-    const validFiles = files.filter((f) => f.patch && f.patch.trim().length > 0);
-    if (validFiles.length === 0) {
-        return { diff: "", truncated: false, omittedCount: 0, includedFiles: [] };
-    }
-    const chunks = [];
-    const includedFiles = [];
-    let currentLen = 0;
-    let truncated = false;
-    let omittedCount = 0;
-    for (let i = 0; i < validFiles.length; i++) {
-        const f = validFiles[i];
-        const chunk = `--- ${f.filename}\n${f.patch}`;
-        const nextLen = chunks.length === 0 ? chunk.length : currentLen + 1 + chunk.length;
-        if (chunks.length > 0 && nextLen > maxDiffChars) {
-            truncated = true;
-            omittedCount = validFiles.length - i;
-            break;
-        }
-        chunks.push(chunk);
-        includedFiles.push(f.filename);
-        currentLen = nextLen;
-        if (currentLen >= maxDiffChars && i < validFiles.length - 1) {
-            truncated = true;
-            omittedCount = validFiles.length - (i + 1);
-            break;
-        }
-    }
-    let diff = chunks.join("\n");
-    if (truncated && omittedCount > 0) {
-        diff += `\n\n${t.diffTruncated(omittedCount)}`;
-    }
-    return { diff, truncated, omittedCount, includedFiles };
-}
-function parseConfigFile(content) {
-    try {
-        const parsed = yaml_1.default.parse(content);
-        if (!parsed || typeof parsed !== "object")
-            return {};
-        return parsed;
-    }
-    catch {
-        return {};
-    }
-}
-function parseStringList(val) {
-    if (!val)
-        return [];
-    if (Array.isArray(val)) {
-        return val.map((s) => String(s).trim()).filter(Boolean);
-    }
-    return String(val)
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean);
-}
-/**
- * 解析并合并 Action Inputs、ConfigFile、内置默认值
- * 优先级：Action 输入参数（with: 显式传入） > 配置文件 > 内置默认值
- */
-function resolveConfig(inputs, fileConfig = {}) {
-    // language
-    const rawLang = (inputs.language || fileConfig.language || "zh").toLowerCase();
-    const language = rawLang === "en" ? "en" : "zh";
-    // ignorePatterns: 内置默认 + 用户输入/配置
-    const inputPatterns = parseStringList(inputs.ignore_patterns);
-    const filePatterns = parseStringList(fileConfig.ignore_patterns);
-    const extraPatterns = inputPatterns.length > 0 ? inputPatterns : filePatterns;
-    const ignorePatterns = Array.from(new Set([...exports.DEFAULT_IGNORE_PATTERNS, ...extraPatterns]));
-    // customInstructions
-    const customInstructions = inputs.custom_instructions !== undefined && inputs.custom_instructions.trim() !== ""
-        ? inputs.custom_instructions
-        : (fileConfig.custom_instructions ?? "");
-    // maxDiffChars
-    let maxDiffChars = 40000;
-    if (inputs.max_diff_chars && !isNaN(parseInt(inputs.max_diff_chars, 10))) {
-        maxDiffChars = parseInt(inputs.max_diff_chars, 10);
-    }
-    else if (fileConfig.max_diff_chars && typeof fileConfig.max_diff_chars === "number") {
-        maxDiffChars = fileConfig.max_diff_chars;
-    }
-    // maxBodyChars
-    let maxBodyChars = 60000;
-    if (inputs.max_body_chars && !isNaN(parseInt(inputs.max_body_chars, 10))) {
-        maxBodyChars = parseInt(inputs.max_body_chars, 10);
-    }
-    else if (fileConfig.max_body_chars && typeof fileConfig.max_body_chars === "number") {
-        maxBodyChars = fileConfig.max_body_chars;
-    }
-    // onUpdate
-    let onUpdate = "replace";
-    if (inputs.on_update) {
-        const raw = inputs.on_update.toLowerCase().trim();
-        if (raw === "resolve" || raw === "keep" || raw === "replace") {
-            onUpdate = raw;
-        }
-    }
-    else if (inputs.keep_previous_comments === "true") {
-        onUpdate = "keep";
-    }
-    else if (fileConfig.on_update) {
-        const raw = fileConfig.on_update.toLowerCase().trim();
-        if (raw === "resolve" || raw === "keep" || raw === "replace") {
-            onUpdate = raw;
-        }
-    }
-    else if (fileConfig.keep_previous_comments === true) {
-        onUpdate = "keep";
-    }
-    // skipDraft (默认 true)
-    let skipDraft = true;
-    if (inputs.skip_draft !== undefined && inputs.skip_draft !== "") {
-        skipDraft = inputs.skip_draft.toLowerCase().trim() !== "false";
-    }
-    else if (fileConfig.skip_draft !== undefined) {
-        skipDraft = Boolean(fileConfig.skip_draft);
-    }
-    // ignoreBots (默认 true)
-    let ignoreBots = true;
-    if (inputs.ignore_bots !== undefined && inputs.ignore_bots !== "") {
-        ignoreBots = inputs.ignore_bots.toLowerCase().trim() !== "false";
-    }
-    else if (fileConfig.ignore_bots !== undefined) {
-        ignoreBots = Boolean(fileConfig.ignore_bots);
-    }
-    // ignoreAuthors
-    const inputAuthors = parseStringList(inputs.ignore_authors);
-    const fileAuthors = parseStringList(fileConfig.ignore_authors);
-    const ignoreAuthors = inputAuthors.length > 0 ? inputAuthors : fileAuthors;
-    return {
-        language,
-        ignorePatterns,
-        customInstructions,
-        maxDiffChars,
-        maxBodyChars,
-        onUpdate,
-        skipDraft,
-        ignoreBots,
-        ignoreAuthors,
-    };
-}
+
+
+/***/ }),
+
+/***/ 8473:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.shouldSkipReview = shouldSkipReview;
 function shouldSkipReview(params) {
     const isZh = (params.lang ?? "zh") === "zh";
     // 1. 草稿 PR
@@ -31145,12 +31020,10 @@ function shouldSkipReview(params) {
     }
     const login = params.author?.login ?? "";
     const type = params.author?.type ?? "";
-    // 2. Bot PR
+    // 2. Bot PR（仅认 GitHub 官方信号：账号 type=Bot，或 "[bot]" 后缀的
+    //    App 账号登录名；不做 "-bot" 之类的启发式猜测，真人可自行加入 ignore_authors）
     if (params.ignoreBots) {
-        const isBot = type.toLowerCase() === "bot" ||
-            login.toLowerCase().endsWith("[bot]") ||
-            login.toLowerCase().endsWith("-bot") ||
-            login.toLowerCase().includes("[bot]");
+        const isBot = type.toLowerCase() === "bot" || login.toLowerCase().endsWith("[bot]");
         if (isBot) {
             return {
                 skip: true,
@@ -31173,6 +31046,589 @@ function shouldSkipReview(params) {
         }
     }
     return { skip: false };
+}
+
+
+/***/ }),
+
+/***/ 8784:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.getPrDiff = getPrDiff;
+const core = __importStar(__nccwpck_require__(6966));
+const diff_1 = __nccwpck_require__(353);
+const paginate_1 = __nccwpck_require__(5903);
+/**
+ * 分页拉取 PR 全部文件，经过 ignore 过滤与按文件块安全截断，
+ * 返回 diff 文本与被保留文件的新增行号集合。
+ */
+async function getPrDiff(octokit, repo, prNumber, config) {
+    const files = await (0, paginate_1.paginate)((page) => octokit.rest.pulls
+        .listFiles({ ...repo, pull_number: prNumber, per_page: 100, page })
+        .then((r) => r.data));
+    const validFiles = [];
+    for (const f of files) {
+        if ((0, diff_1.isIgnored)(f.filename, config.ignorePatterns)) {
+            core.info(`忽略 ${f.filename}`);
+            continue;
+        }
+        if (!f.patch)
+            continue;
+        validFiles.push({ filename: f.filename, patch: f.patch });
+    }
+    const result = (0, diff_1.formatDiffAndTruncate)(validFiles, config.maxDiffChars, config.language);
+    if (result.truncated) {
+        core.info(`diff 过大，已按文件块安全截断到 ${config.maxDiffChars} 字符以内（略去后续 ${result.omittedCount} 个文件）`);
+    }
+    // 仅对保留在 diff 中的文件建立行号映射
+    const includedSet = new Set(result.includedFiles);
+    const fileLines = new Map();
+    for (const f of validFiles) {
+        if (includedSet.has(f.filename))
+            fileLines.set(f.filename, (0, diff_1.addedLines)(f.patch));
+    }
+    return { diff: result.diff, fileLines };
+}
+
+
+/***/ }),
+
+/***/ 3776:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.deleteOldInlineComments = deleteOldInlineComments;
+exports.resolveOldInlineThreads = resolveOldInlineThreads;
+exports.findOldReviewId = findOldReviewId;
+const core = __importStar(__nccwpck_require__(6966));
+const errors_1 = __nccwpck_require__(3113);
+const review_1 = __nccwpck_require__(9058);
+const paginate_1 = __nccwpck_require__(5903);
+/**
+ * 删除上一轮 inori 的 inline 评论（body 内嵌标记识别）。
+ * 有人回复过的线程跳过，不破坏人工讨论。
+ */
+async function deleteOldInlineComments(octokit, repo, prNumber) {
+    const all = await (0, paginate_1.paginate)((page) => octokit.rest.pulls
+        .listReviewComments({ ...repo, pull_number: prNumber, per_page: 100, page })
+        .then((r) => r.data));
+    const replied = new Set(all.filter((c) => c.in_reply_to_id).map((c) => c.in_reply_to_id));
+    for (const c of all) {
+        if (!c.body?.includes(review_1.REVIEW_MARKER) || c.in_reply_to_id || replied.has(c.id))
+            continue;
+        try {
+            await octokit.rest.pulls.deleteReviewComment({ ...repo, comment_id: c.id });
+        }
+        catch (e) {
+            core.warning(`删除旧 inline 评论 #${c.id} 失败：${(0, errors_1.errMsg)(e)}`);
+        }
+    }
+}
+/**
+ * 将上一轮 inori 创建且未被人工回复的 review threads 标记为 Resolved。
+ * 旧意见折叠留痕，不堆叠未读红点。
+ */
+async function resolveOldInlineThreads(octokit, repo, prNumber) {
+    let cursor = null;
+    let hasNextPage = true;
+    while (hasNextPage) {
+        const data = (await octokit.graphql(`
+      query($owner: String!, $repo: String!, $prNumber: Int!, $cursor: String) {
+        repository(owner: $owner, name: $repo) {
+          pullRequest(number: $prNumber) {
+            reviewThreads(first: 100, after: $cursor) {
+              pageInfo { hasNextPage endCursor }
+              nodes {
+                id
+                isResolved
+                comments(first: 100) { nodes { id body } }
+              }
+            }
+          }
+        }
+      }
+    `, { owner: repo.owner, repo: repo.repo, prNumber, cursor }));
+        const threads = data.repository?.pullRequest?.reviewThreads?.nodes ?? [];
+        for (const thread of threads) {
+            if (thread.isResolved)
+                continue;
+            const comments = thread.comments?.nodes ?? [];
+            if (comments.length === 0)
+                continue;
+            // 仅处理首条为 inori 且无人工回复（单条）的线程
+            if (comments[0].body.includes(review_1.REVIEW_MARKER) && comments.length === 1) {
+                try {
+                    await octokit.graphql(`
+            mutation($threadId: ID!) {
+              resolveReviewThread(input: { threadId: $threadId }) {
+                thread { id isResolved }
+              }
+            }
+          `, { threadId: thread.id });
+                    core.info(`已将历史评审线程 ${thread.id} 标记为已解决 (Resolved)`);
+                }
+                catch (e) {
+                    core.warning(`标记评审线程 ${thread.id} 已解决失败：${(0, errors_1.errMsg)(e)}`);
+                }
+            }
+        }
+        const pageInfo = data.repository?.pullRequest?.reviewThreads?.pageInfo;
+        hasNextPage = pageInfo?.hasNextPage ?? false;
+        cursor = pageInfo?.endCursor ?? null;
+    }
+}
+/** 找到最近一轮 inori 评审的 id（body 内嵌标记识别），无则返回 null */
+async function findOldReviewId(octokit, repo, prNumber) {
+    const reviews = await (0, paginate_1.paginate)((page) => octokit.rest.pulls
+        .listReviews({ ...repo, pull_number: prNumber, per_page: 100, page })
+        .then((r) => r.data));
+    let target = null;
+    // 列表按提交时间升序，持续覆盖取最后一个命中的
+    for (const rv of reviews) {
+        if (rv.body?.includes(review_1.REVIEW_MARKER))
+            target = rv.id;
+    }
+    return target;
+}
+
+
+/***/ }),
+
+/***/ 2580:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.paginate = exports.findOldReviewId = exports.resolveOldInlineThreads = exports.deleteOldInlineComments = exports.postReview = exports.getPrDiff = void 0;
+const diffSource_1 = __nccwpck_require__(8784);
+Object.defineProperty(exports, "getPrDiff", ({ enumerable: true, get: function () { return diffSource_1.getPrDiff; } }));
+const history_1 = __nccwpck_require__(3776);
+Object.defineProperty(exports, "deleteOldInlineComments", ({ enumerable: true, get: function () { return history_1.deleteOldInlineComments; } }));
+Object.defineProperty(exports, "findOldReviewId", ({ enumerable: true, get: function () { return history_1.findOldReviewId; } }));
+Object.defineProperty(exports, "resolveOldInlineThreads", ({ enumerable: true, get: function () { return history_1.resolveOldInlineThreads; } }));
+const paginate_1 = __nccwpck_require__(5903);
+Object.defineProperty(exports, "paginate", ({ enumerable: true, get: function () { return paginate_1.paginate; } }));
+const publish_1 = __nccwpck_require__(887);
+Object.defineProperty(exports, "postReview", ({ enumerable: true, get: function () { return publish_1.postReview; } }));
+
+
+/***/ }),
+
+/***/ 5903:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.paginate = paginate;
+const PAGE_SIZE = 100;
+/**
+ * 逐页拉取直到不满一页（GitHub API 单页上限 100）。
+ * fetchPage 负责发起请求并把当页响应映射为条目数组。
+ */
+async function paginate(fetchPage) {
+    const all = [];
+    let page = 1;
+    let items = [];
+    do {
+        items = await fetchPage(page);
+        all.push(...items);
+        page += 1;
+    } while (items.length === PAGE_SIZE);
+    return all;
+}
+
+
+/***/ }),
+
+/***/ 887:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.postReview = postReview;
+const core = __importStar(__nccwpck_require__(6966));
+const errors_1 = __nccwpck_require__(3113);
+const review_1 = __nccwpck_require__(9058);
+const history_1 = __nccwpck_require__(3776);
+// ── 评审发布 ──
+/**
+ * 发布评审（更新复用模式）：GitHub REST 无法删除已提交的 review，
+ * 因此汇总 body 复用同一轮评审（updateReview 原地更新）。
+ * inline 评论按 onUpdate 策略处理上一轮痕迹（replace 删除 / resolve
+ * 折叠 / keep 保留），再逐条发新的（每条内嵌标记供下轮识别清理）。
+ */
+async function postReview(octokit, repo, prNumber, headSha, body, inlines, onUpdate) {
+    if (onUpdate === "replace") {
+        try {
+            await (0, history_1.deleteOldInlineComments)(octokit, repo, prNumber);
+        }
+        catch (e) {
+            core.warning(`清理旧 inline 评论失败，继续发布：${(0, errors_1.errMsg)(e)}`);
+        }
+    }
+    else if (onUpdate === "resolve") {
+        try {
+            await (0, history_1.resolveOldInlineThreads)(octokit, repo, prNumber);
+        }
+        catch (e) {
+            core.warning(`解决旧 inline 评审线程失败，继续发布：${(0, errors_1.errMsg)(e)}`);
+        }
+    }
+    let posted = false;
+    try {
+        const oldId = await (0, history_1.findOldReviewId)(octokit, repo, prNumber);
+        if (oldId !== null) {
+            await octokit.rest.pulls.updateReview({
+                ...repo,
+                pull_number: prNumber,
+                review_id: oldId,
+                body,
+            });
+            posted = true;
+        }
+    }
+    catch (e) {
+        core.warning(`更新旧评审失败，改为新建：${(0, errors_1.errMsg)(e)}`);
+    }
+    if (!posted) {
+        await octokit.rest.pulls.createReview({
+            ...repo,
+            pull_number: prNumber,
+            body,
+            event: "COMMENT",
+            commit_id: headSha,
+        });
+    }
+    // inline 逐条发布，单条失败只跳过该条；汇总 body 已覆盖整体结论
+    for (const ic of inlines) {
+        try {
+            await octokit.rest.pulls.createReviewComment({
+                ...repo,
+                pull_number: prNumber,
+                body: `${ic.body}\n\n${review_1.REVIEW_MARKER}`,
+                path: ic.path,
+                line: ic.line,
+                commit_id: headSha,
+            });
+            core.info(`inline 评论: ${ic.path}:${ic.line}`);
+        }
+        catch (e) {
+            core.warning(`inline 评论失败，跳过该条：${(0, errors_1.errMsg)(e)}`);
+        }
+    }
+}
+
+
+/***/ }),
+
+/***/ 6866:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+const core = __importStar(__nccwpck_require__(6966));
+const github = __importStar(__nccwpck_require__(4903));
+const review_1 = __nccwpck_require__(9058);
+const skip_1 = __nccwpck_require__(8473);
+const config_1 = __nccwpck_require__(9749);
+const github_1 = __nccwpck_require__(2580);
+const llm_1 = __nccwpck_require__(8018);
+async function main() {
+    const ctx = github.context;
+    if (!ctx.payload.pull_request) {
+        core.setFailed("非 pull_request 事件，跳过");
+        return;
+    }
+    const pr = ctx.payload.pull_request;
+    const config = (0, config_1.loadConfig)();
+    // 智能早退检查（草稿 PR、Bot PR、忽略作者），先于任何 API/LLM 调用
+    const skipCheck = (0, skip_1.shouldSkipReview)({
+        isDraft: pr.draft,
+        skipDraft: config.skipDraft,
+        author: pr.user,
+        ignoreBots: config.ignoreBots,
+        ignoreAuthors: config.ignoreAuthors,
+        lang: config.language,
+    });
+    if (skipCheck.skip) {
+        core.info(skipCheck.reason ?? "跳过评审");
+        return;
+    }
+    const settings = (0, llm_1.readLlmSettings)();
+    const token = core.getInput("github_token", { required: true });
+    const octokit = github.getOctokit(token);
+    const repo = { owner: ctx.repo.owner, repo: ctx.repo.repo };
+    const { diff, fileLines } = await (0, github_1.getPrDiff)(octokit, repo, pr.number, config);
+    if (!diff || diff.trim().length === 0) {
+        core.info("无有效代码变更需评审");
+        return;
+    }
+    core.info(`评审 ${repo.owner}/${repo.repo} PR #${pr.number}，diff ${diff.length} 字符，模型 ${settings.model}`);
+    const content = await (0, llm_1.callLlm)(diff, config, settings);
+    const { summary, inlines, bodyItems } = (0, review_1.parseReviews)(content, fileLines);
+    // 空结果也发布「未发现问题」并替换/更新旧评审，避免上一轮的意见残留误导
+    const body = (0, review_1.buildReviewBody)({ summary, bodyItems, model: settings.model }, config.language, config.maxBodyChars);
+    await (0, github_1.postReview)(octokit, repo, pr.number, pr.head.sha, body, inlines, config.onUpdate);
+    core.info("评审已发布");
+}
+main().catch((e) => {
+    core.setFailed(`评审失败：${e instanceof Error ? e.message : String(e)}`);
+});
+
+
+/***/ }),
+
+/***/ 8018:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.readLlmSettings = readLlmSettings;
+exports.callLlm = callLlm;
+const core = __importStar(__nccwpck_require__(6966));
+const prompt_1 = __nccwpck_require__(9080);
+const errors_1 = __nccwpck_require__(3113);
+/** 读取必填的 LLM action inputs 与内置调用参数 */
+function readLlmSettings() {
+    return {
+        endpoint: core.getInput("llm_endpoint", { required: true }).replace(/\/+$/, ""),
+        model: core.getInput("llm_model", { required: true }),
+        apiKey: core.getInput("llm_api_key", { required: true }),
+        timeoutMs: 300_000,
+        maxRetries: 3,
+    };
+}
+/** 单次调用 OpenAI 兼容的 /chat/completions 接口，非 2xx 抛 LlmHttpError */
+async function chatCompletions(settings, body) {
+    const resp = await fetch(`${settings.endpoint}/chat/completions`, {
+        method: "POST",
+        headers: {
+            Authorization: `Bearer ${settings.apiKey}`,
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(settings.timeoutMs),
+    });
+    if (!resp.ok) {
+        const detail = (await resp.text()).slice(0, 200);
+        throw new errors_1.LlmHttpError(resp.status, detail);
+    }
+    const data = (await resp.json());
+    const content = data.choices?.[0]?.message?.content;
+    if (!content) {
+        throw new Error(`LLM 响应结构异常: ${JSON.stringify(data).slice(0, 300)}`);
+    }
+    return content.trim();
+}
+/**
+ * 调用 LLM 产出评审内容：
+ * - 部分兼容端点不支持 response_format（通常报 400），自动去掉该参数重试一次；
+ * - 429/5xx/超时/网络错误按指数退避重试，最多 maxRetries 次。
+ */
+async function callLlm(diff, config, settings) {
+    const prompt = (0, prompt_1.buildPrompt)(diff, config.language, config.customInstructions);
+    const body = {
+        model: settings.model,
+        messages: [{ role: "user", content: prompt }],
+        temperature: 0.3,
+        response_format: { type: "json_object" },
+    };
+    let droppedResponseFormat = false;
+    let attempt = 0;
+    for (;;) {
+        try {
+            return await chatCompletions(settings, body);
+        }
+        catch (e) {
+            if (e instanceof errors_1.LlmHttpError && e.status === 400 && !droppedResponseFormat) {
+                droppedResponseFormat = true;
+                delete body.response_format;
+                core.warning("端点可能不支持 response_format，已去掉该参数重试");
+                continue;
+            }
+            attempt += 1;
+            if (attempt > settings.maxRetries || !(0, errors_1.isRetryableLlmError)(e))
+                throw e;
+            const delayMs = 1000 * 2 ** attempt;
+            core.warning(`LLM 调用失败：${e instanceof Error ? e.message : String(e)}，${delayMs / 1000}s 后重试（${attempt}/${settings.maxRetries}）`);
+            await new Promise((resolve) => setTimeout(resolve, delayMs));
+        }
+    }
 }
 
 
