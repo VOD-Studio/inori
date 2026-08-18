@@ -7,7 +7,7 @@ branding:
 
 inputs:
   provider:
-    description: 'LLM provider preset (e.g. deepseek, openai, google, xai, zhipu, qwen, kimi, volcengine, minimax, anthropic, openrouter, groq, etc.). Subscription plans: qwen-coding, glm-coding, doubao-coding, minimax-token (separate endpoint/key system). Auto-fills endpoint and model.'
+    description: 'LLM provider preset id. Pay-as-you-go: deepseek | openai | google (Gemini) | xai (Grok) | zhipu (GLM) | dashscope (Qwen) | moonshot (Kimi) | volcengine (Doubao) | minimax | anthropic (Claude) | siliconflow | openrouter | groq | github-models | mistral | perplexity | ollama | local (vLLM/LM Studio). Subscription plans (separate endpoint/key): glm-coding | qwen-coding | doubao-coding | minimax-token. Auto-fills endpoint and model; aliases like qwen/glm/kimi/doubao also accepted. Full list: README "Supported providers".'
     required: false
     default: ''
   llm_endpoint:

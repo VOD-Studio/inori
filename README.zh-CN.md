@@ -45,7 +45,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: VOD-Studio/inori@v0.1.0
+      - uses: VOD-Studio/inori@v0
         with:
           provider: deepseek             # 自动识别端点与模型；也可传 `llm_model: gpt-4o` 等
           llm_api_key: ${{ secrets.DEEPSEEK_API_KEY }}
@@ -62,7 +62,7 @@ jobs:
 > - **Gemini**：`provider: google`（或 `llm_model: gemini-3.7-flash`）
 > - **Grok**：`provider: xai`（或 `llm_model: grok-4.6`）
 > - **Claude**：`provider: anthropic`（或 `llm_model: claude-sonnet-4`）
-> - **Doubao / Groq / OpenRouter / Mistral / Ollama / MiniMax ...**（精选 22 个主流预设）
+> - **Doubao / Groq / OpenRouter / Mistral / Ollama / MiniMax ...** —— 完整预设表见[下方](#支持的提供商)（共 22 个）
 >
 > **订阅套餐**（固定月费额度）使用**独立的端点与 key 体系**，与按量计费凭据**不互通**：
 > - `provider: qwen-coding` → `https://coding.dashscope.aliyuncs.com/v1`，需 `sk-sp-` 套餐 key（模型：`qwen3-coder-plus`、`kimi-k2.5`、`glm-5`、`MiniMax-M2.5` 等）
@@ -72,6 +72,35 @@ jobs:
 > DeepSeek 与 Kimi（Moonshot）官方无订阅套餐（纯按量计费）；`kimi-k2.5` 等是阿里/火山套餐白名单里聚合的第三方模型。
 > ⚠️ 注意：各平台 ToS 限制套餐 key 仅用于指定编程工具、禁止自动化 API 调用。在 CI 评审中使用可能违反条款、有封 key 风险，请自行评估。
 > - **自建代理 / 本地部署**：显式指定 `llm_endpoint: https://your-gateway/v1` 始终享有最高优先级。
+
+## 支持的提供商
+
+以下 22 个预设均已对照官方文档核验（2026-08-18）。传入 `provider` 值即自动补全端点；`llm_model` 可选（默认值见下表）。也可以只传 `llm_model`，Inori 会按模型名特征自动推断提供商。
+
+| 提供商 | `provider` 值 | 默认模型 |
+|---|---|---|
+| DeepSeek | `deepseek` | `deepseek-v4-flash` |
+| OpenAI | `openai` | `gpt-4o-mini` |
+| Gemini | `google` | `gemini-3.7-flash` |
+| Grok | `xai` | `grok-4.6` |
+| GLM | `zhipu`（别名 `glm`） | `glm-4.7-flash` |
+| Qwen | `dashscope`（别名 `qwen`） | `qwen-plus` |
+| Kimi | `moonshot`（别名 `kimi`） | `kimi-k2.6` |
+| Doubao | `volcengine`（别名 `doubao`） | `doubao-seed-2-0-lite-260428` |
+| MiniMax | `minimax` | `MiniMax-M2` |
+| Claude | `anthropic` | `claude-sonnet-4-20250514` |
+| SiliconFlow | `siliconflow` | `deepseek-ai/DeepSeek-V3` |
+| OpenRouter | `openrouter` | `deepseek/deepseek-chat-v3.1` |
+| Groq | `groq` | `openai/gpt-oss-120b` |
+| GitHub Models | `github-models` | `openai/gpt-4o-mini` |
+| Mistral | `mistral` | `codestral-latest` |
+| Perplexity | `perplexity` | `sonar` |
+| Ollama（本地） | `ollama` | `llama3` |
+| vLLM / LM Studio（本地） | `local` | `default` |
+
+订阅套餐预设（`glm-coding`、`qwen-coding`、`doubao-coding`、`minimax-token`）的端点、key 与 ToS 风险见上方警示块。
+
+其他任意 OpenAI 兼容端点可通过显式 `llm_endpoint` 接入（始终享有最高优先级）。
 
 ## 仓库配置（`.github/inori.yml`）
 
