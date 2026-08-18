@@ -94,6 +94,8 @@ describe('resolveConfig 优先级：Action Inputs > 配置文件 > 内置默认�
       codingPlan: DEFAULTS.codingPlan,
       language: DEFAULTS.language,
       ignorePatterns: expect.any(Array),
+      pathsIgnore: DEFAULTS.pathsIgnore,
+      ignoreCommitPrefixes: DEFAULTS.ignoreCommitPrefixes,
       customInstructions: DEFAULTS.customInstructions,
       maxDiffChars: DEFAULTS.maxDiffChars,
       maxBodyChars: DEFAULTS.maxBodyChars,

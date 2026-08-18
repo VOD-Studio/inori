@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { shouldSkipReview } from '../../src/core/skip'
+import {
+  shouldSkipByCommitPrefixes,
+  shouldSkipByPaths,
+  shouldSkipReview,
+} from '../../src/core/skip'
 
 describe('shouldSkipReview 智能早退 (Issue 3)', () => {
   it('草稿 PR 默认早退', () => {
@@ -78,5 +82,60 @@ describe('shouldSkipReview 智能早退 (Issue 3)', () => {
       ignoreAuthors: ['other-user'],
     })
     expect(res.skip).toBe(false)
+  })
+})
+
+describe('shouldSkipByPaths 路径级整体跳过', () => {
+  it('全部文件命中跳过路径时跳过', () => {
+    const res = shouldSkipByPaths(['.github/workflows/ci.yml', '.github/inori.yml'], ['.github/**'])
+    expect(res.skip).toBe(true)
+    expect(res.reason).toContain('2 个变更文件')
+  })
+
+  it('存在未命中文件时不跳过（混合 PR 照常评审）', () => {
+    const res = shouldSkipByPaths(
+      ['.github/workflows/ci.yml', 'src/main.ts'],
+      ['.github/**', 'docs/**'],
+    )
+    expect(res.skip).toBe(false)
+  })
+
+  it('裸文件名与目录内 glob 同 isIgnored 语义', () => {
+    expect(shouldSkipByPaths(['CHANGELOG.md'], ['CHANGELOG.md']).skip).toBe(true)
+    expect(shouldSkipByPaths(['docs/adr/0001.md'], ['docs/**']).skip).toBe(true)
+  })
+
+  it('未配置模式或空文件列表不跳过（交由空 diff 早退兜底）', () => {
+    expect(shouldSkipByPaths(['.github/x.yml'], []).skip).toBe(false)
+    expect(shouldSkipByPaths([], ['.github/**']).skip).toBe(false)
+  })
+})
+
+describe('shouldSkipByCommitPrefixes 提交标识级整体跳过', () => {
+  it('全部 commit subject 命中前缀时跳过', () => {
+    const res = shouldSkipByCommitPrefixes(
+      ['ci(ai-review): 升级模型', 'ci: 触发验证'],
+      ['ci:', 'docs:'],
+    )
+    expect(res.skip).toBe(true)
+    expect(res.reason).toContain('2 个 commit')
+  })
+
+  it('混合任一非命中 commit 不跳过', () => {
+    const res = shouldSkipByCommitPrefixes(['ci: x', 'feat(api): 新功能'], ['ci:'])
+    expect(res.skip).toBe(false)
+  })
+
+  it('前缀忽略大小写与首尾空白', () => {
+    expect(shouldSkipByCommitPrefixes(['CI: x'], [' ci: ']).skip).toBe(true)
+  })
+
+  it('带 scope 前缀不误判（ci: 不匹配 circle:）', () => {
+    expect(shouldSkipByCommitPrefixes(['circleci: config'], ['ci:']).skip).toBe(false)
+  })
+
+  it('未配置前缀或空列表不跳过', () => {
+    expect(shouldSkipByCommitPrefixes(['ci: x'], []).skip).toBe(false)
+    expect(shouldSkipByCommitPrefixes([], ['ci:']).skip).toBe(false)
   })
 })

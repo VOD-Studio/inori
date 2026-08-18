@@ -20,6 +20,8 @@ type DefaultFields = Pick<
   | 'ignoreBots'
   | 'ignoreAuthors'
   | 'ignorePatterns'
+  | 'pathsIgnore'
+  | 'ignoreCommitPrefixes'
   | 'customInstructions'
 >
 
@@ -33,5 +35,7 @@ export const DEFAULTS = {
   ignoreBots: true,
   ignoreAuthors: [] as string[],
   ignorePatterns: [] as string[],
+  pathsIgnore: [] as string[],
+  ignoreCommitPrefixes: [] as string[],
   customInstructions: '',
 } as const satisfies DefaultFields

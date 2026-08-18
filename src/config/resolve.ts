@@ -110,6 +110,16 @@ export function resolveConfig(inputs: ActionInputs, fileConfig: InoriConfig = {}
   const extraPatterns = listField(inputs.ignore_patterns, fileConfig.ignore_patterns)
   const ignorePatterns = Array.from(new Set([...DEFAULT_IGNORE_PATTERNS, ...extraPatterns]))
 
+  // 4b. pathsIgnore: 纯此类变更的 PR 整体跳过（不与内置默认合并，
+  //     未配置即不启用——与 ignorePatterns 语义正交）
+  const pathsIgnore = listField(inputs.paths_ignore, fileConfig.paths_ignore)
+
+  // 4c. ignoreCommitPrefixes: PR 全部 commit 的 subject 命中前缀时整体跳过
+  const ignoreCommitPrefixes = listField(
+    inputs.ignore_commit_prefixes,
+    fileConfig.ignore_commit_prefixes,
+  )
+
   // 5. customInstructions: 非空 input > 文件 > 空
   const customInstructions = strField(
     inputs.custom_instructions,
@@ -155,6 +165,8 @@ export function resolveConfig(inputs: ActionInputs, fileConfig: InoriConfig = {}
     codingPlan,
     language,
     ignorePatterns,
+    pathsIgnore,
+    ignoreCommitPrefixes,
     customInstructions,
     maxDiffChars,
     maxBodyChars,
