@@ -44,7 +44,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: VOD-Studio/inori@v0.1.0
+      - uses: VOD-Studio/inori@v0
         with:
           provider: deepseek             # Auto-detects endpoint & model; or pass `llm_model: gpt-4o`, etc.
           llm_api_key: ${{ secrets.DEEPSEEK_API_KEY }}
@@ -61,7 +61,7 @@ jobs:
 > - **Gemini**: `provider: google` (or `llm_model: gemini-3.7-flash`)
 > - **Grok**: `provider: xai` (or `llm_model: grok-4.6`)
 > - **Claude**: `provider: anthropic` (or `llm_model: claude-sonnet-4`)
-> - **Doubao / Groq / OpenRouter / Mistral / Ollama / MiniMax ...** (22 curated mainstream presets)
+> - **Doubao / Groq / OpenRouter / Mistral / Ollama / MiniMax ...** — see the [full preset table](#supported-providers) below (22 presets)
 >
 > **Subscription plans** (fixed monthly quota) use a **separate endpoint & key system** — NOT interchangeable with pay-as-you-go credentials:
 > - `provider: qwen-coding` → `https://coding.dashscope.aliyuncs.com/v1` with a `sk-sp-` key (models: `qwen3-coder-plus`, `kimi-k2.5`, `glm-5`, `MiniMax-M2.5`, ...)
@@ -71,6 +71,35 @@ jobs:
 > DeepSeek and Kimi (Moonshot) offer no subscription plans (pure pay-as-you-go); `kimi-k2.5` etc. appear inside Ali/Volcengine plan whitelists as aggregated third-party models.
 > ⚠️ Note: provider ToS restrict plan keys to designated coding tools and prohibit automated API usage. Using them in CI review may violate the terms and risk key suspension — evaluate before use.
 > - **Custom Proxy / Self-hosted**: Explicit `llm_endpoint: https://your-gateway/v1` always takes highest precedence.
+
+## Supported providers
+
+All 22 presets below are verified against official docs (2026-08-18). Pass the `provider` value and Inori auto-fills the endpoint; `llm_model` is optional (defaults shown). You can also pass just `llm_model` — Inori infers the provider from the model name.
+
+| Provider | `provider` value | Default model |
+|---|---|---|
+| DeepSeek | `deepseek` | `deepseek-v4-flash` |
+| OpenAI | `openai` | `gpt-4o-mini` |
+| Gemini | `google` | `gemini-3.7-flash` |
+| Grok | `xai` | `grok-4.6` |
+| GLM | `zhipu` (alias `glm`) | `glm-4.7-flash` |
+| Qwen | `dashscope` (alias `qwen`) | `qwen-plus` |
+| Kimi | `moonshot` (alias `kimi`) | `kimi-k2.6` |
+| Doubao | `volcengine` (alias `doubao`) | `doubao-seed-2-0-lite-260428` |
+| MiniMax | `minimax` | `MiniMax-M2` |
+| Claude | `anthropic` | `claude-sonnet-4-20250514` |
+| SiliconFlow | `siliconflow` | `deepseek-ai/DeepSeek-V3` |
+| OpenRouter | `openrouter` | `deepseek/deepseek-chat-v3.1` |
+| Groq | `groq` | `openai/gpt-oss-120b` |
+| GitHub Models | `github-models` | `openai/gpt-4o-mini` |
+| Mistral | `mistral` | `codestral-latest` |
+| Perplexity | `perplexity` | `sonar` |
+| Ollama (local) | `ollama` | `llama3` |
+| vLLM / LM Studio (local) | `local` | `default` |
+
+Subscription-plan presets (`glm-coding`, `qwen-coding`, `doubao-coding`, `minimax-token`) — see the warning block above for their endpoints, keys and ToS risks.
+
+Any other OpenAI-compatible endpoint works via explicit `llm_endpoint` (always takes highest precedence).
 
 ## Configuration (`.github/inori.yml`)
 

@@ -83,8 +83,6 @@ type 对齐 Conventional Commits（feat/fix/chore/docs/refactor/style/test/perf/
 ## 代码注释规范
 
 注释只写代码无法自表达的信息，复述签名就是噪音：
-
-- ❌ 复读签名（`// buildPrompt 构建提示词`）；✅ 泛词补义（`// Handle 执行邮箱验证`）。
 - ❌ 设计论证/历史决策塞注释（属 PR 描述）；✅ 非显然陷阱（`// 返回 error 而非
   throw：外层有 cleanup defer，throw 会跳过`）。
 - ❌ 过期注释指向已删除符号——重构搬代码时同步改指向，拿不准就删。
@@ -98,14 +96,19 @@ type 对齐 Conventional Commits（feat/fix/chore/docs/refactor/style/test/perf/
 
 - 开 PR 时 `gh pr create` 默认不指定 assignees/reviewers/labels（避免邮件骚扰），
   base 指向 `main`。有对应 issue 时 body 用 `Closes #N`。
-- 合并：功能/修复 PR 用 **merge commit**（保留原子 commit 粒度）；release-please
-  自动开的 release PR 用 **squash**。合并后删除分支。
+- 合并：功能/修复 PR 一律 **squash**（release PR 同为 squash），合并后删除分支。
+  原因：release-please 会把 merge commit（记 PR title）与分支原始 commit 各记
+  一条，CHANGELOG 出现重复条目（Inori 无应用层去重兜底，与 violet 不同）；
+  squash 后 main 上一个 PR 一条 Conventional Commit，changelog 粒度 = PR，
+  天然无重复。
 
 ### 发版流程（release-please）
 
 push 到 main → release-please 自动开「release PR」（含 CHANGELOG、版本号、
-manifest）→ review 后 squash 合并 → 自动打 `v*` tag → release.yml 创建 GitHub
-Release 并移动 major 浮动 tag（v0.2.0 → v0，用户可 `@v0` 引用）。
+manifest）→ review 后 squash 合并 → 自动打 `v*` tag、创建 GitHub Release 并
+移动 major 浮动 tag（v0.2.0 → v0，用户可 `@v0` 引用）。tag/Release/浮动 tag
+全部由 release-please.yml 一个 workflow 收口（GITHUB_TOKEN 创建的 ref 不触发
+其他 workflow，独立 tag 监听收不到事件）。
 
 - 发版型 commit（feat/fix/perf/refactor）触发新版本；docs/ci/chore 不触发。
 - 版本号从 commit 类型推导（feat → minor，fix → patch）；需锁定时在发版型
