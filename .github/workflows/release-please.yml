@@ -1,0 +1,44 @@
+# 自动发版（release-please）
+#
+# 工作流：push 到 main → release-please 开「release PR」（含待发 CHANGELOG、
+# 版本号、manifest 更新）→ 维护者 review 后 squash 合并 → 自动打 v* tag →
+# 触发 release.yml（GitHub Release + 移动 major 浮动 tag，即本项目的「部署」）。
+#
+# 发版型 commit（feat/fix/perf/refactor）才会触发新版本；纯 docs/ci/chore 改动
+# 不触发（changelog-sections 配置为 hidden，全部 hidden 时跳过开 PR）。
+# 版本号从 commit 类型推导：feat → minor，fix → patch；需锁定版本时在发版型
+# commit footer 加 Release-As: vX.Y.Z。
+#
+# token 用 GITHUB_TOKEN。若组织策略禁止 GITHUB_TOKEN 创建 PR（violet 曾遇到），
+# release-please 开 PR 会失败——届时改为在 repo secrets 配 RELEASE_PLEASE_TOKEN
+# （fine-grained PAT，contents:read + pull-requests:write）并替换下方 token 行。
+#
+# v4 自定义配置（中文 changelog 分节等）通过 manifest 配置文件传入。
+
+name: Release Please
+
+on:
+  push:
+    branches: [main]
+  # push 事件偶发不触发 Actions 时的手动兜底：gh workflow run release-please.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write       # 创建 release PR + 打 tag
+  pull-requests: write  # 开 release PR
+
+# 连续 push 并发跑会竞争同一 release PR，串行排队；不取消进行中 run：
+# release-please 操作 git 状态，取消可能留下中间态
+concurrency:
+  group: release-please
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: googleapis/release-please-action@v5
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
