@@ -117,6 +117,9 @@ ignore_bots: true           # 机器人 PR 是否跳过评审 (默认: true)
 ignore_patterns:            # 额外忽略的文件 glob 模式（与内置忽略规则合并）
   - "*.generated.ts"
   - "fixtures/**"
+paths_ignore:               # 全部变更文件命中时整体跳过评审
+  - ".github/**"
+  - "docs/**"
 custom_instructions: |
   1. 所有前端组件禁止内联样式，统一使用 Tailwind CSS。
   2. 新增导出函数与接口必须附带完整 TSDoc 注释。
@@ -145,6 +148,7 @@ Inori 默认自动忽略以下常见非评审文件（无需在 `ignore_patterns
 | `github_token` | 具有 `pull-requests:write` 权限的 GitHub Token | — | `${{ github.token }}` |
 | `language` | 评审意见输出语言：`zh` \| `en` | — | `zh` |
 | `ignore_patterns` | 逗号分隔的额外忽略 glob 规则（与内置规则合并） | — | — |
+| `paths_ignore` | 全部变更文件命中时**整体跳过**评审（纯 CI/文档类变更无代码语义）。与 `ignore_patterns`（仅从评审上下文剔除文件）语义正交。 | — | — |
 | `max_diff_chars` | Diff 字符数上限，超出将在文件块边界安全截断 | — | `40000` |
 | `max_body_chars` | 评审 Summary 字符数上限（GitHub API 单条上限 65536） | — | `60000` |
 | `custom_instructions` | 附加评审规则（团队规范、禁止调用的 API 等） | — | — |

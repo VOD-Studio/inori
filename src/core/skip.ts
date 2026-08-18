@@ -1,3 +1,4 @@
+import { isIgnored } from './diff'
 import type { Lang } from './i18n'
 
 // ── 智能早退判定（草稿 PR / Bot PR / 指定作者）──
@@ -56,4 +57,23 @@ export function shouldSkipReview(params: SkipCheckParams): SkipResult {
   }
 
   return { skip: false }
+}
+
+// ── 路径级整体跳过 ──
+
+/**
+ * 判定 PR 全部变更文件是否命中跳过路径——纯此类变更的 push 无代码语义，
+ * 整体跳过评审（与 ignore_patterns 的内容过滤正交：那是把文件从评审
+ * 上下文剔除，这里是声明「只改这些的 PR 不需要评审」）。
+ *
+ * 空文件列表视为无可判定内容，不跳过（交由后续空 diff 早退兜底）。
+ */
+export function shouldSkipByPaths(filenames: string[], patterns: string[]): SkipResult {
+  if (patterns.length === 0 || filenames.length === 0) return { skip: false }
+  const allMatched = filenames.every((f) => isIgnored(f, patterns))
+  if (!allMatched) return { skip: false }
+  return {
+    skip: true,
+    reason: `全部 ${filenames.length} 个变更文件命中跳过路径，无代码语义，跳过评审`,
+  }
 }

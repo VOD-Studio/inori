@@ -116,6 +116,9 @@ ignore_bots: true           # skip review for bot-created PRs (default: true)
 ignore_patterns:            # additional glob patterns (merged with built-in ignores)
   - "*.generated.ts"
   - "fixtures/**"
+paths_ignore:               # skip the WHOLE review when ALL changed files match
+  - ".github/**"
+  - "docs/**"
 custom_instructions: |
   1. 所有前端组件禁止内联样式，统一使用 Tailwind CSS。
   2. 新增导出函数与接口必须附带完整 TSDoc 注释。
@@ -144,6 +147,7 @@ Inori automatically ignores common non-reviewable files by default (no need to r
 | `github_token` | GitHub token with `pull-requests:write`. Defaults to the workflow token. | — | `${{ github.token }}` |
 | `language` | Output language for review comments: `zh` \| `en` | — | `zh` |
 | `ignore_patterns` | Comma-separated globs of extra files to skip (in addition to built-in ignore rules) | — | — |
+| `paths_ignore` | Globs; when **all** changed files in a push match, the review is skipped entirely (pure CI/docs-only changes). Unlike `ignore_patterns`, which only removes files from the review context. | — | — |
 | `max_diff_chars` | Character limit before diff is safely truncated at file boundaries | — | `40000` |
 | `max_body_chars` | Character limit for the review body (GitHub caps at 65536) | — | `60000` |
 | `custom_instructions` | Extra review rules appended to the prompt (team conventions, banned APIs, etc.) | — | — |

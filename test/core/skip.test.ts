@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { shouldSkipReview } from '../../src/core/skip'
+import { shouldSkipByPaths, shouldSkipReview } from '../../src/core/skip'
 
 describe('shouldSkipReview 智能早退 (Issue 3)', () => {
   it('草稿 PR 默认早退', () => {
@@ -78,5 +78,31 @@ describe('shouldSkipReview 智能早退 (Issue 3)', () => {
       ignoreAuthors: ['other-user'],
     })
     expect(res.skip).toBe(false)
+  })
+})
+
+describe('shouldSkipByPaths 路径级整体跳过', () => {
+  it('全部文件命中跳过路径时跳过', () => {
+    const res = shouldSkipByPaths(['.github/workflows/ci.yml', '.github/inori.yml'], ['.github/**'])
+    expect(res.skip).toBe(true)
+    expect(res.reason).toContain('2 个变更文件')
+  })
+
+  it('存在未命中文件时不跳过（混合 PR 照常评审）', () => {
+    const res = shouldSkipByPaths(
+      ['.github/workflows/ci.yml', 'src/main.ts'],
+      ['.github/**', 'docs/**'],
+    )
+    expect(res.skip).toBe(false)
+  })
+
+  it('裸文件名与目录内 glob 同 isIgnored 语义', () => {
+    expect(shouldSkipByPaths(['CHANGELOG.md'], ['CHANGELOG.md']).skip).toBe(true)
+    expect(shouldSkipByPaths(['docs/adr/0001.md'], ['docs/**']).skip).toBe(true)
+  })
+
+  it('未配置模式或空文件列表不跳过（交由空 diff 早退兜底）', () => {
+    expect(shouldSkipByPaths(['.github/x.yml'], []).skip).toBe(false)
+    expect(shouldSkipByPaths([], ['.github/**']).skip).toBe(false)
   })
 })

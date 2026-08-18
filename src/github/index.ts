@@ -1,4 +1,4 @@
-import { getPrDiff } from './diffSource'
+import { buildDiffFromFiles, listPrFiles } from './diffSource'
 import { deleteOldInlineComments, findOldReviewId, resolveOldInlineThreads } from './history'
 import type { OctokitInstance, RepoContext } from './paginate'
 import { paginate } from './paginate'
@@ -8,9 +8,10 @@ import { postReview } from './publish'
 
 export type { OctokitInstance, RepoContext }
 export {
+  buildDiffFromFiles,
   deleteOldInlineComments,
   findOldReviewId,
-  getPrDiff,
+  listPrFiles,
   paginate,
   postReview,
   resolveOldInlineThreads,

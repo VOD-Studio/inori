@@ -37,6 +37,10 @@ inputs:
     description: 'Comma-separated glob patterns of additional files to skip (built-in defaults include lockfiles, minified files, svg, etc.)'
     required: false
     default: ''
+  paths_ignore:
+    description: 'Glob patterns; when ALL changed files in a push match, skip the review entirely (pure CI/docs-only changes have no code semantics). Unlike ignore_patterns, which only filters files out of the review context.'
+    required: false
+    default: ''
   max_diff_chars:
     description: 'Character limit before the diff is truncated at a file boundary (default 40000)'
     required: false

@@ -2,8 +2,14 @@ import * as core from '@actions/core'
 import * as github from '@actions/github'
 import { loadConfig } from './config'
 import { buildReviewBody, parseReviews } from './core/review'
-import { shouldSkipReview } from './core/skip'
-import { getPrDiff, type OctokitInstance, postReview, type RepoContext } from './github'
+import { shouldSkipByPaths, shouldSkipReview } from './core/skip'
+import {
+  buildDiffFromFiles,
+  listPrFiles,
+  type OctokitInstance,
+  postReview,
+  type RepoContext,
+} from './github'
 import { callLlm, readLlmSettings } from './llm'
 
 // ── 入口：编排管道 ──
@@ -45,7 +51,20 @@ async function main(): Promise<void> {
   const octokit: OctokitInstance = github.getOctokit(token)
   const repo: RepoContext = { owner: ctx.repo.owner, repo: ctx.repo.repo }
 
-  const { diff, fileLines } = await getPrDiff(octokit, repo, pr.number, config)
+  const files = await listPrFiles(octokit, repo, pr.number)
+
+  // 路径级整体跳过：纯 CI/文档类变更（全部命中 paths_ignore）无代码语义，
+  // 先于 diff 组装退出，不耗 LLM 额度
+  const pathsSkip = shouldSkipByPaths(
+    files.map((f) => f.filename),
+    config.pathsIgnore,
+  )
+  if (pathsSkip.skip) {
+    core.info(pathsSkip.reason ?? '跳过评审')
+    return
+  }
+
+  const { diff, fileLines } = buildDiffFromFiles(files, config)
   if (!diff || diff.trim().length === 0) {
     core.info('无有效代码变更需评审')
     return

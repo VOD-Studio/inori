@@ -18,6 +18,7 @@ export interface ActionInputs {
   coding_plan: string
   language: string
   ignore_patterns: string
+  paths_ignore: string
   custom_instructions: string
   max_diff_chars: string
   max_body_chars: string
@@ -36,6 +37,7 @@ export interface InoriConfig {
   coding_plan?: boolean
   language?: Lang
   ignore_patterns?: string[] | string
+  paths_ignore?: string[] | string
   custom_instructions?: string
   max_diff_chars?: number
   max_body_chars?: number
@@ -62,6 +64,7 @@ export interface ResolvedConfig {
   codingPlan: boolean
   language: Lang
   ignorePatterns: string[]
+  pathsIgnore: string[]
   customInstructions: string
   maxDiffChars: number
   maxBodyChars: number

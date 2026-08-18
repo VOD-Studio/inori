@@ -11,22 +11,24 @@ export interface PrDiff {
   fileLines: Map<string, Set<number>>
 }
 
-/**
- * 分页拉取 PR 全部文件，经过 ignore 过滤与按文件块安全截断，
- * 返回 diff 文本与被保留文件的新增行号集合。
- */
-export async function getPrDiff(
+/** 分页拉取 PR 全部文件列表（含 patch 字段） */
+export async function listPrFiles(
   octokit: OctokitInstance,
   repo: RepoContext,
   prNumber: number,
-  config: ResolvedConfig,
-): Promise<PrDiff> {
-  const files = await paginate<PrFile>((page) =>
+): Promise<PrFile[]> {
+  return paginate<PrFile>((page) =>
     octokit.rest.pulls
       .listFiles({ ...repo, pull_number: prNumber, per_page: 100, page })
       .then((r) => r.data as PrFile[]),
   )
+}
 
+/**
+ * 文件列表经 ignore 过滤与按文件块安全截断，
+ * 返回 diff 文本与被保留文件的新增行号集合。
+ */
+export function buildDiffFromFiles(files: PrFile[], config: ResolvedConfig): PrDiff {
   const validFiles: { filename: string; patch: string }[] = []
   for (const f of files) {
     if (isIgnored(f.filename, config.ignorePatterns)) {
