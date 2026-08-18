@@ -24,6 +24,26 @@ function delay(ms: number): Promise<void> {
 }
 
 /**
+ * 阿里百炼 Coding Plan 防呆：套餐 key（sk-sp-）与按量计费 key（sk-）
+ * 的端点不互通（官方文档明示）。混用时前者报 invalid_api_key、
+ * 后者不抵扣套餐直接按量扣费——都是用户花冤枉钱的坑，提前警告。
+ */
+function warnCodingPlanMismatch(config: ResolvedConfig, apiKey: string): void {
+  const codingEndpoint = config.llmEndpoint.includes("coding.dashscope.aliyuncs.com");
+  const payAsYouGo = config.llmEndpoint.includes("dashscope.aliyuncs.com") && !codingEndpoint;
+  const codingKey = apiKey.startsWith("sk-sp-");
+  if (codingKey && payAsYouGo) {
+    core.warning(
+      "检测到 Coding Plan API Key（sk-sp-）但端点是按量计费端点（dashscope.aliyuncs.com）。两者不互通：该调用将返回 invalid_api_key。如需套餐抵扣请改用 provider: qwen-coding（https://coding.dashscope.aliyuncs.com/v1）"
+    );
+  } else if (!codingKey && codingEndpoint) {
+    core.warning(
+      "端点是 Coding Plan 套餐端点（coding.dashscope.aliyuncs.com）但 key 不是套餐格式（sk-sp-）。两者不互通：通用 key 调用套餐端点将返回 invalid_api_key，且该调用不会抵扣套餐额度"
+    );
+  }
+}
+
+/**
  * 根据已解析配置（含自动推断与自定义）与环境密钥构造 LLM 调用设置。
  * API Key 查找顺序：llm_api_key input > 推断 provider 的专属环境变量
  * （如 ZHIPU_API_KEY）> 通用 LLM_API_KEY > 默认 provider（deepseek）专属变量。
@@ -49,6 +69,7 @@ export function readLlmSettings(config: ResolvedConfig): LlmSettings {
     throw new Error(`缺少 LLM API Key：请在 Action with 中配置 llm_api_key 或设置环境变量${hint}`);
   }
 
+  warnCodingPlanMismatch(config, apiKey);
   return {
     endpoint: config.llmEndpoint.replace(/\/+$/, ""),
     model: config.llmModel,

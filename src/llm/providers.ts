@@ -55,6 +55,18 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     aliases: ["bigmodel", "zhipuai", "glm", "codegeex"],
     modelPatterns: [/^(glm-|codegeex)/i],
   },
+  // ── 3a. GLM Coding Plan（智谱编程套餐，id: glm-coding）──
+  // 套餐 key 与按量计费 key/端点不互通；仅限官方指定编程工具使用
+  // （官方 ToS 严禁 API 自动化调用，CI 场景请自行评估合规风险）。
+  {
+    id: "glm-coding",
+    name: "GLM Coding Plan",
+    defaultEndpoint: "https://open.bigmodel.cn/api/coding/paas/v4",
+    defaultModel: "glm-5.3",
+    aliases: ["zhipu-coding", "glm-coding-plan"],
+    // 模型名无法区分计费体系（glm-5.3 两边同名），必须显式指定 provider
+    modelPatterns: [],
+  },
   // ── 4. Qwen（阿里云百炼，id: dashscope）──
   {
     id: "dashscope",
@@ -63,6 +75,18 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     defaultModel: "qwen-plus",
     aliases: ["qwen", "aliyun", "tongyi", "alibaba", "bailian"],
     modelPatterns: [/^(qwen(?!\/)|tongyi)/i],
+  },
+  // ── 4a. Qwen Coding Plan（阿里云百炼编程套餐，id: qwen-coding）──
+  // sk-sp- 套餐 key 与 sk- 按量 key/端点不互通；白名单模型跨厂商
+  // （qwen3-coder-plus / kimi-k2.5 / glm-5 / MiniMax-M2.5 等）。
+  // 官方 ToS 严禁 API 自动化调用，CI 场景请自行评估合规风险。
+  {
+    id: "qwen-coding",
+    name: "Qwen Coding Plan",
+    defaultEndpoint: "https://coding.dashscope.aliyuncs.com/v1",
+    defaultModel: "qwen3-coder-plus",
+    aliases: ["dashscope-coding", "qwen-coding-plan"],
+    modelPatterns: [],
   },
   // ── 5. 硅基流动 (SiliconFlow) ──
   {

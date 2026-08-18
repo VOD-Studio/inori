@@ -7,7 +7,7 @@ branding:
 
 inputs:
   provider:
-    description: 'LLM provider preset (e.g. deepseek, openai, zhipu, qwen, siliconflow, kimi, volcengine, anthropic, openrouter, groq, etc.). Auto-fills endpoint and model.'
+    description: 'LLM provider preset (e.g. deepseek, openai, zhipu, qwen, siliconflow, kimi, volcengine, anthropic, openrouter, groq, etc.). Coding Plan subscriptions: qwen-coding, glm-coding (separate endpoint/key system). Auto-fills endpoint and model.'
     required: false
     default: ''
   llm_endpoint:

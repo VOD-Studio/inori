@@ -61,6 +61,11 @@ jobs:
 > - **OpenAI**: `provider: openai` (or `llm_model: gpt-4o-mini`, `gpt-4o`)
 > - **Claude**: `provider: anthropic` (or `llm_model: claude-sonnet-4`)
 > - **Doubao / ERNIE / Hunyuan / Yi / Groq / OpenRouter / Mistral / Ollama / MiniMax ...** (All 24+ built-in presets!)
+>
+> **Coding Plan subscriptions** (fixed monthly quota) use a **separate endpoint & key system** — they are NOT interchangeable with pay-as-you-go credentials:
+> - `provider: qwen-coding` → `https://coding.dashscope.aliyuncs.com/v1` with a `sk-sp-` key (models: `qwen3-coder-plus`, `kimi-k2.5`, `glm-5`, `MiniMax-M2.5`, ...)
+> - `provider: glm-coding` → `https://open.bigmodel.cn/api/coding/paas/v4`
+> ⚠️ Note: provider ToS restrict Coding Plan keys to designated coding tools and prohibit automated API usage. Using them in CI review may violate the terms and risk key suspension — evaluate before use.
 > - **Custom Proxy / Self-hosted**: Explicit `llm_endpoint: https://your-gateway/v1` always takes highest precedence.
 
 ## Configuration (`.github/inori.yml`)

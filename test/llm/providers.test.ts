@@ -15,6 +15,8 @@ describe("PROVIDER_PRESETS 预设完整性与合法性", () => {
     expect(ids).toContain("deepseek");
     expect(ids).toContain("zhipu");
     expect(ids).toContain("dashscope");
+    expect(ids).toContain("qwen-coding");
+    expect(ids).toContain("glm-coding");
     expect(ids).toContain("siliconflow");
     expect(ids).toContain("moonshot");
     expect(ids).toContain("volcengine");
@@ -149,6 +151,30 @@ describe("resolveLlmEndpointAndModel 综合自动补全与自定义优先级", (
     expect(res.model).toBe("glm-4.7-flash");
     expect(res.provider).toBe("zhipu");
     expect(res.isCustomEndpoint).toBe(false);
+  });
+
+  it("Coding Plan 预设：qwen-coding 套餐端点与白名单模型", () => {
+    const res = resolveLlmEndpointAndModel({ provider: "qwen-coding" });
+    expect(res.endpoint).toBe("https://coding.dashscope.aliyuncs.com/v1");
+    expect(res.model).toBe("qwen3-coder-plus");
+    expect(res.provider).toBe("qwen-coding");
+  });
+
+  it("Coding Plan 预设：glm-coding 套餐端点（独立于按量计费 /api/paas/v4）", () => {
+    const res = resolveLlmEndpointAndModel({ provider: "glm-coding" });
+    expect(res.endpoint).toBe("https://open.bigmodel.cn/api/coding/paas/v4");
+    expect(res.model).toBe("glm-5.3");
+    expect(res.provider).toBe("glm-coding");
+  });
+
+  it("Coding Plan 别名归一化", () => {
+    expect(findProvider("dashscope-coding")?.id).toBe("qwen-coding");
+    expect(findProvider("zhipu-coding")?.id).toBe("glm-coding");
+  });
+
+  it("Coding Plan 模型名不做推断（modelPatterns 为空，避免与按量体系抢匹配）", () => {
+    expect(detectProviderByModel("qwen3-coder-plus")?.id).not.toBe("qwen-coding");
+    expect(detectProviderByModel("glm-5.3")?.id).toBe("zhipu"); // 仍按按量体系匹配
   });
 
   it("场景 2: 用户指定 provider（如 qwen 别名），自动归一化并使用默认模型", () => {
