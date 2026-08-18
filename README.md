@@ -61,7 +61,7 @@ jobs:
 > - **Gemini**: `provider: google` (or `llm_model: gemini-3.7-flash`)
 > - **Grok**: `provider: xai` (or `llm_model: grok-4.6`)
 > - **Claude**: `provider: anthropic` (or `llm_model: claude-sonnet-4`)
-> - **Doubao / ERNIE / Hunyuan / Yi / Groq / OpenRouter / Mistral / Ollama / MiniMax ...** (All 26+ built-in presets!)
+> - **Doubao / Groq / OpenRouter / Mistral / Ollama / MiniMax ...** (22 curated mainstream presets)
 >
 > **Subscription plans** (fixed monthly quota) use a **separate endpoint & key system** — NOT interchangeable with pay-as-you-go credentials:
 > - `provider: qwen-coding` → `https://coding.dashscope.aliyuncs.com/v1` with a `sk-sp-` key (models: `qwen3-coder-plus`, `kimi-k2.5`, `glm-5`, `MiniMax-M2.5`, ...)

@@ -7,8 +7,8 @@ import {
 } from "../../src/llm/providers";
 
 describe("PROVIDER_PRESETS 预设完整性与合法性", () => {
-  it("包含全球与国内 24 个主流大模型提供商预设", () => {
-    expect(PROVIDER_PRESETS.length).toBeGreaterThanOrEqual(24);
+  it("包含全球与国内 22 个主流大模型提供商预设", () => {
+    expect(PROVIDER_PRESETS.length).toBe(22);
     const ids = PROVIDER_PRESETS.map((p) => p.id);
 
     // 国内主流
@@ -23,12 +23,7 @@ describe("PROVIDER_PRESETS 预设完整性与合法性", () => {
     expect(ids).toContain("moonshot");
     expect(ids).toContain("volcengine");
     expect(ids).toContain("minimax");
-    expect(ids).toContain("baidu");
-    expect(ids).toContain("tencent");
-    expect(ids).toContain("lingyi");
-    expect(ids).toContain("stepfun");
-    expect(ids).toContain("baichuan");
-    expect(ids).toContain("infinigence");
+
 
     expect(ids).toContain("google");
     expect(ids).toContain("xai");
@@ -37,8 +32,7 @@ describe("PROVIDER_PRESETS 预设完整性与合法性", () => {
     expect(ids).toContain("openrouter");
     expect(ids).toContain("groq");
     expect(ids).toContain("github-models");
-    expect(ids).toContain("together");
-    expect(ids).toContain("fireworks");
+
     expect(ids).toContain("mistral");
     expect(ids).toContain("perplexity");
     expect(ids).toContain("ollama");
@@ -77,11 +71,7 @@ describe("findProvider 别名与名称匹配", () => {
     expect(findProvider("huoshan")?.id).toBe("volcengine");
 
     expect(findProvider("silicon")?.id).toBe("siliconflow");
-    expect(findProvider("qianfan")?.id).toBe("baidu");
-    expect(findProvider("ernie")?.id).toBe("baidu");
-    expect(findProvider("hunyuan")?.id).toBe("tencent");
-    expect(findProvider("01.ai")?.id).toBe("lingyi");
-    expect(findProvider("yi")?.id).toBe("lingyi");
+
 
     expect(findProvider("claude")?.id).toBe("anthropic");
     expect(findProvider("github")?.id).toBe("github-models");
@@ -118,11 +108,7 @@ describe("detectProviderByModel 通过模型特征模式自动推断 Provider", 
     expect(detectProviderByModel("deepseek-ai/DeepSeek-V3")?.id).toBe("siliconflow");
     expect(detectProviderByModel("Qwen/Qwen2.5-Coder-32B-Instruct")?.id).toBe("siliconflow");
 
-    expect(detectProviderByModel("ernie-4.0-turbo-8k")?.id).toBe("baidu");
-    expect(detectProviderByModel("hunyuan-standard")?.id).toBe("tencent");
-    expect(detectProviderByModel("yi-lightning")?.id).toBe("lingyi");
-    expect(detectProviderByModel("step-1-8k")?.id).toBe("stepfun");
-    expect(detectProviderByModel("baichuan4")?.id).toBe("baichuan");
+
   });
 
   it("识别国际主流模型名称", () => {

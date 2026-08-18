@@ -8,8 +8,11 @@
 //   已对照官方文档核验 defaultModel：deepseek/moonshot/dashscope/volcengine/
 //     github-models/openai/anthropic/groq/openrouter/mistral/perplexity/zhipu/
 //     google（Gemini OpenAI 兼容层，文档 2026-08-17）/ xai（grok-4.6，文档 2026-08-12）
-//   defaultModel 未验证（保留快照，标注）：siliconflow/baidu/tencent/lingyi/
-//     stepfun/baichuan/infinigence/together（端点探测通过，模型名保留快照）
+//   defaultModel 未验证（保留快照，标注）：siliconflow
+//
+// 长尾预设已删（2026-08-18，以 omp 内置目录与市场份额为准）：
+//   baidu/tencent/lingyi/stepfun/baichuan/infinigence/together/fireworks
+//   ——显式 endpoint/model 配置不受影响，随时可用 llm_endpoint 自助接入。
 //
 // 订阅套餐（Coding Plan / Token Plan）体系（2026-08-18 官方文档核验）：
 //   qwen-coding（阿里 sk-sp-）/ glm-coding（智谱）/ doubao-coding（火山）/
@@ -177,60 +180,6 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     aliases: ["minimax-coding", "minimax-plan", "token-plan"],
     modelPatterns: [],
   },
-  // ── 9. ERNIE（百度千帆，id: baidu）──
-  {
-    id: "baidu",
-    name: "ERNIE",
-    defaultEndpoint: "https://qianfan.baidubce.com/v2",
-    defaultModel: "ernie-4.0-turbo-8k",
-    aliases: ["qianfan", "ernie", "wenxin"],
-    modelPatterns: [/^(ernie|eb-)/i],
-  },
-  // ── 10. Hunyuan（腾讯，id: tencent）──
-  {
-    id: "tencent",
-    name: "Hunyuan",
-    defaultEndpoint: "https://api.hunyuan.cloud.tencent.com/v1",
-    defaultModel: "hunyuan-standard",
-    aliases: ["hunyuan", "tencentcloud"],
-    modelPatterns: [/^hunyuan/i],
-  },
-  // ── 11. Yi（零一万物，id: lingyi）──
-  {
-    id: "lingyi",
-    name: "Yi",
-    defaultEndpoint: "https://api.lingyiwanwu.com/v1",
-    defaultModel: "yi-lightning",
-    aliases: ["01.ai", "yi", "lingyiwanwu"],
-    modelPatterns: [/^yi-/i],
-  },
-  // ── 12. StepFun（阶跃星辰，id: stepfun）──
-  {
-    id: "stepfun",
-    name: "StepFun",
-    defaultEndpoint: "https://api.stepfun.com/v1",
-    defaultModel: "step-1-8k",
-    aliases: ["step", "jieyue"],
-    modelPatterns: [/^step-/i],
-  },
-  // ── 13. Baichuan（百川智能，id: baichuan）──
-  {
-    id: "baichuan",
-    name: "Baichuan",
-    defaultEndpoint: "https://api.baichuan-ai.com/v1",
-    defaultModel: "Baichuan4",
-    aliases: ["baichuan-ai"],
-    modelPatterns: [/^baichuan/i],
-  },
-  // ── 14. InfiniAI（无问芯穹，id: infinigence）──
-  {
-    id: "infinigence",
-    name: "InfiniAI",
-    defaultEndpoint: "https://cloud.infini-ai.com/maas/v1",
-    defaultModel: "deepseek-v3",
-    aliases: ["infini", "genstudio"],
-    modelPatterns: [],
-  },
   // ── 15. Claude（Anthropic，id: anthropic）──
   {
     id: "anthropic",
@@ -266,24 +215,6 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     defaultModel: "openai/gpt-4o-mini",
     aliases: ["github", "gh-models"],
     modelPatterns: [],
-  },
-  // ── 19. Together AI ──
-  {
-    id: "together",
-    name: "Together AI",
-    defaultEndpoint: "https://api.together.xyz/v1",
-    defaultModel: "deepseek-ai/DeepSeek-V3",
-    aliases: ["together-ai", "togetherai"],
-    modelPatterns: [/^meta-llama\//i, /^togethercomputer\//i],
-  },
-  // ── 20. Fireworks AI ──
-  {
-    id: "fireworks",
-    name: "Fireworks AI",
-    defaultEndpoint: "https://api.fireworks.ai/inference/v1",
-    defaultModel: "accounts/fireworks/models/kimi-k2-instruct-0905",
-    aliases: ["fireworks-ai"],
-    modelPatterns: [/^accounts\/fireworks\//i],
   },
   // ── 21. Mistral AI ──
   {
@@ -431,17 +362,10 @@ export const PROVIDER_ENV_KEYS: Readonly<Record<string, string>> = {
   moonshot: "MOONSHOT_API_KEY",
   volcengine: "VOLCENGINE_API_KEY",
   minimax: "MINIMAX_API_KEY",
-  baidu: "QIANFAN_API_KEY",
-  tencent: "HUNYUAN_API_KEY",
-  lingyi: "YI_API_KEY",
-  stepfun: "STEPFUN_API_KEY",
-  baichuan: "BAICHUAN_API_KEY",
   anthropic: "ANTHROPIC_API_KEY",
   openrouter: "OPENROUTER_API_KEY",
   groq: "GROQ_API_KEY",
   "github-models": "GITHUB_TOKEN",
-  together: "TOGETHER_API_KEY",
-  fireworks: "FIREWORKS_API_KEY",
   mistral: "MISTRAL_API_KEY",
   perplexity: "PERPLEXITY_API_KEY",
 };
