@@ -77,3 +77,32 @@ export function shouldSkipByPaths(filenames: string[], patterns: string[]): Skip
     reason: `全部 ${filenames.length} 个变更文件命中跳过路径，无代码语义，跳过评审`,
   }
 }
+
+// ── 提交标识级整体跳过 ──
+
+/**
+ * 判定 PR 全部 commit 的 message 是否命中跳过前缀——纯 ci:/docs:/chore:
+ * 类提交无代码语义，整体跳过评审。
+ *
+ * 全部命中才跳过：混合了任一非跳过前缀 commit 即照常评审（PR 语义以
+ * 代码变更为准）。commit message 取首行（subject），忽略大小写。
+ * squashed 后的 subject 以触发 push 的 head commit 为准。
+ */
+export function shouldSkipByCommitPrefixes(subjects: string[], prefixes: string[]): SkipResult {
+  if (prefixes.length === 0 || subjects.length === 0) return { skip: false }
+  // 前缀归一为裸 type（"ci:"），subject 按 Conventional Commits 解析 type
+  // 再比对：ci(ai-review): x 命中，circle: 不误中；非 CC 格式退回整串前缀匹配
+  const types = prefixes.map((p) => p.trim().toLowerCase().replace(/:$/, ''))
+  const subjectType = (s: string): string => {
+    const m = /^\(?([a-z]+)(?:\([^)]*\))?!?:/.exec(s.trim().toLowerCase())
+    return m ? m[1] : s.trim().toLowerCase()
+  }
+  const allMatched = subjects.every((s) =>
+    types.some((t) => subjectType(s) === t || s.trim().toLowerCase().startsWith(`${t}:`)),
+  )
+  if (!allMatched) return { skip: false }
+  return {
+    skip: true,
+    reason: `全部 ${subjects.length} 个 commit 命中跳过前缀（${prefixes.join(', ')}），无代码语义，跳过评审`,
+  }
+}

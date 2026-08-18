@@ -2,9 +2,10 @@ import * as core from '@actions/core'
 import * as github from '@actions/github'
 import { loadConfig } from './config'
 import { buildReviewBody, parseReviews } from './core/review'
-import { shouldSkipByPaths, shouldSkipReview } from './core/skip'
+import { shouldSkipByCommitPrefixes, shouldSkipByPaths, shouldSkipReview } from './core/skip'
 import {
   buildDiffFromFiles,
+  listPrCommitSubjects,
   listPrFiles,
   type OctokitInstance,
   postReview,
@@ -50,6 +51,17 @@ async function main(): Promise<void> {
   const token = core.getInput('github_token', { required: true })
   const octokit: OctokitInstance = github.getOctokit(token)
   const repo: RepoContext = { owner: ctx.repo.owner, repo: ctx.repo.repo }
+
+  // 提交标识级整体跳过：PR 全部 commit 的 subject 命中前缀（纯 ci:/docs:
+  // 类提交，Conventional Commits 语义即「无代码变更」）时跳过，最省路径
+  const prefixesSkip = shouldSkipByCommitPrefixes(
+    await listPrCommitSubjects(octokit, repo, pr.number),
+    config.ignoreCommitPrefixes,
+  )
+  if (prefixesSkip.skip) {
+    core.info(prefixesSkip.reason ?? '跳过评审')
+    return
+  }
 
   const files = await listPrFiles(octokit, repo, pr.number)
 

@@ -19,6 +19,7 @@ export interface ActionInputs {
   language: string
   ignore_patterns: string
   paths_ignore: string
+  ignore_commit_prefixes: string
   custom_instructions: string
   max_diff_chars: string
   max_body_chars: string
@@ -38,6 +39,7 @@ export interface InoriConfig {
   language?: Lang
   ignore_patterns?: string[] | string
   paths_ignore?: string[] | string
+  ignore_commit_prefixes?: string[] | string
   custom_instructions?: string
   max_diff_chars?: number
   max_body_chars?: number
@@ -65,6 +67,7 @@ export interface ResolvedConfig {
   language: Lang
   ignorePatterns: string[]
   pathsIgnore: string[]
+  ignoreCommitPrefixes: string[]
   customInstructions: string
   maxDiffChars: number
   maxBodyChars: number

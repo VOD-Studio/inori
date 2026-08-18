@@ -114,6 +114,12 @@ export function resolveConfig(inputs: ActionInputs, fileConfig: InoriConfig = {}
   //     未配置即不启用——与 ignorePatterns 语义正交）
   const pathsIgnore = listField(inputs.paths_ignore, fileConfig.paths_ignore)
 
+  // 4c. ignoreCommitPrefixes: PR 全部 commit 的 subject 命中前缀时整体跳过
+  const ignoreCommitPrefixes = listField(
+    inputs.ignore_commit_prefixes,
+    fileConfig.ignore_commit_prefixes,
+  )
+
   // 5. customInstructions: 非空 input > 文件 > 空
   const customInstructions = strField(
     inputs.custom_instructions,
@@ -160,6 +166,7 @@ export function resolveConfig(inputs: ActionInputs, fileConfig: InoriConfig = {}
     language,
     ignorePatterns,
     pathsIgnore,
+    ignoreCommitPrefixes,
     customInstructions,
     maxDiffChars,
     maxBodyChars,

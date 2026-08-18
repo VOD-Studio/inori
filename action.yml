@@ -41,6 +41,10 @@ inputs:
     description: 'Glob patterns; when ALL changed files in a push match, skip the review entirely (pure CI/docs-only changes have no code semantics). Unlike ignore_patterns, which only filters files out of the review context.'
     required: false
     default: ''
+  ignore_commit_prefixes:
+    description: 'Commit subject prefixes (e.g. "ci:,docs:,chore:"); when ALL commits in the PR match, skip the review entirely (Conventional Commits semantics: no code change). Mixed PRs with any non-matching commit are still reviewed.'
+    required: false
+    default: ''
   max_diff_chars:
     description: 'Character limit before the diff is truncated at a file boundary (default 40000)'
     required: false

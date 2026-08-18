@@ -54,3 +54,17 @@ export function buildDiffFromFiles(files: PrFile[], config: ResolvedConfig): PrD
   }
   return { diff: result.diff, fileLines }
 }
+
+/** 分页拉取 PR 全部 commit（取 subject 首行用于前缀跳过判定） */
+export async function listPrCommitSubjects(
+  octokit: OctokitInstance,
+  repo: RepoContext,
+  prNumber: number,
+): Promise<string[]> {
+  const commits = await paginate<{ commit: { message: string } }>((page) =>
+    octokit.rest.pulls
+      .listCommits({ ...repo, pull_number: prNumber, per_page: 100, page })
+      .then((r) => r.data as { commit: { message: string } }[]),
+  )
+  return commits.map((c) => c.commit.message.split('\n')[0] ?? '')
+}

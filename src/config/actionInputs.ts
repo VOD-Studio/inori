@@ -17,6 +17,7 @@ export function readActionInputs(): ActionInputs {
     language: core.getInput('language'),
     ignore_patterns: core.getInput('ignore_patterns'),
     paths_ignore: core.getInput('paths_ignore'),
+    ignore_commit_prefixes: core.getInput('ignore_commit_prefixes'),
     custom_instructions: core.getInput('custom_instructions'),
     max_diff_chars: core.getInput('max_diff_chars'),
     max_body_chars: core.getInput('max_body_chars'),

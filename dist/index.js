@@ -40917,6 +40917,7 @@ function readActionInputs() {
         language: core.getInput('language'),
         ignore_patterns: core.getInput('ignore_patterns'),
         paths_ignore: core.getInput('paths_ignore'),
+        ignore_commit_prefixes: core.getInput('ignore_commit_prefixes'),
         custom_instructions: core.getInput('custom_instructions'),
         max_diff_chars: core.getInput('max_diff_chars'),
         max_body_chars: core.getInput('max_body_chars'),
@@ -43413,6 +43414,7 @@ const DEFAULTS = {
     ignoreAuthors: [],
     ignorePatterns: [],
     pathsIgnore: [],
+    ignoreCommitPrefixes: [],
     customInstructions: '',
 };
 
@@ -43522,6 +43524,8 @@ function resolveConfig(inputs, fileConfig = {}) {
     // 4b. pathsIgnore: 纯此类变更的 PR 整体跳过（不与内置默认合并，
     //     未配置即不启用——与 ignorePatterns 语义正交）
     const pathsIgnore = listField(inputs.paths_ignore, fileConfig.paths_ignore);
+    // 4c. ignoreCommitPrefixes: PR 全部 commit 的 subject 命中前缀时整体跳过
+    const ignoreCommitPrefixes = listField(inputs.ignore_commit_prefixes, fileConfig.ignore_commit_prefixes);
     // 5. customInstructions: 非空 input > 文件 > 空
     const customInstructions = strField(inputs.custom_instructions, fileConfig.custom_instructions, DEFAULTS.customInstructions);
     const maxDiffChars = intField(inputs.max_diff_chars, fileConfig.max_diff_chars, DEFAULTS.maxDiffChars);
@@ -43547,6 +43551,7 @@ function resolveConfig(inputs, fileConfig = {}) {
         language,
         ignorePatterns,
         pathsIgnore,
+        ignoreCommitPrefixes,
         customInstructions,
         maxDiffChars,
         maxBodyChars,
@@ -43740,6 +43745,33 @@ function shouldSkipByPaths(filenames, patterns) {
         reason: `全部 ${filenames.length} 个变更文件命中跳过路径，无代码语义，跳过评审`,
     };
 }
+// ── 提交标识级整体跳过 ──
+/**
+ * 判定 PR 全部 commit 的 message 是否命中跳过前缀——纯 ci:/docs:/chore:
+ * 类提交无代码语义，整体跳过评审。
+ *
+ * 全部命中才跳过：混合了任一非跳过前缀 commit 即照常评审（PR 语义以
+ * 代码变更为准）。commit message 取首行（subject），忽略大小写。
+ * squashed 后的 subject 以触发 push 的 head commit 为准。
+ */
+function shouldSkipByCommitPrefixes(subjects, prefixes) {
+    if (prefixes.length === 0 || subjects.length === 0)
+        return { skip: false };
+    // 前缀归一为裸 type（"ci:"），subject 按 Conventional Commits 解析 type
+    // 再比对：ci(ai-review): x 命中，circle: 不误中；非 CC 格式退回整串前缀匹配
+    const types = prefixes.map((p) => p.trim().toLowerCase().replace(/:$/, ''));
+    const subjectType = (s) => {
+        const m = /^\(?([a-z]+)(?:\([^)]*\))?!?:/.exec(s.trim().toLowerCase());
+        return m ? m[1] : s.trim().toLowerCase();
+    };
+    const allMatched = subjects.every((s) => types.some((t) => subjectType(s) === t || s.trim().toLowerCase().startsWith(`${t}:`)));
+    if (!allMatched)
+        return { skip: false };
+    return {
+        skip: true,
+        reason: `全部 ${subjects.length} 个 commit 命中跳过前缀（${prefixes.join(', ')}），无代码语义，跳过评审`,
+    };
+}
 
 ;// CONCATENATED MODULE: ./src/github/paginate.ts
 const PAGE_SIZE = 100;
@@ -43796,6 +43828,13 @@ function buildDiffFromFiles(files, config) {
             fileLines.set(f.filename, addedLines(f.patch));
     }
     return { diff: result.diff, fileLines };
+}
+/** 分页拉取 PR 全部 commit（取 subject 首行用于前缀跳过判定） */
+async function listPrCommitSubjects(octokit, repo, prNumber) {
+    const commits = await paginate((page) => octokit.rest.pulls
+        .listCommits({ ...repo, pull_number: prNumber, per_page: 100, page })
+        .then((r) => r.data));
+    return commits.map((c) => c.commit.message.split('\n')[0] ?? '');
 }
 
 ;// CONCATENATED MODULE: ./src/github/history.ts
@@ -44151,6 +44190,13 @@ async function main() {
     const token = core.getInput('github_token', { required: true });
     const octokit = github.getOctokit(token);
     const repo = { owner: ctx.repo.owner, repo: ctx.repo.repo };
+    // 提交标识级整体跳过：PR 全部 commit 的 subject 命中前缀（纯 ci:/docs:
+    // 类提交，Conventional Commits 语义即「无代码变更」）时跳过，最省路径
+    const prefixesSkip = shouldSkipByCommitPrefixes(await listPrCommitSubjects(octokit, repo, pr.number), config.ignoreCommitPrefixes);
+    if (prefixesSkip.skip) {
+        core.info(prefixesSkip.reason ?? '跳过评审');
+        return;
+    }
     const files = await listPrFiles(octokit, repo, pr.number);
     // 路径级整体跳过：纯 CI/文档类变更（全部命中 paths_ignore）无代码语义，
     // 先于 diff 组装退出，不耗 LLM 额度
