@@ -1,7 +1,15 @@
 // ── 大模型提供商预设与自动推断引擎 ──
-// 内置主流全球与国内提供商预设，
 // 支持通过 provider 名称、别名或模型名前缀自动补全 endpoint 与推荐模型，
-// 同时 100% 支持用户自定义 endpoint 与 model。
+// 同时 100% 支持用户自定义 endpoint 与 model（显式配置永远优先）。
+//
+// ⚠️ defaultModel 是「快照值」，各平台模型目录迭代快（火山方舟等按月滚动），
+// 未显式配置 llm_model 时才会用到。生产环境建议显式指定模型。
+// 验证状态（2026-08-18，对照官方文档）：
+//   已验证：deepseek/moonshot/dashscope/volcengine/github-models/openai/anthropic
+//   端点探测通过（401/400 = 路径存在）：zhipu/siliconflow/baidu/tencent/lingyi/
+//     stepfun/baichuan/infinigence/minimax
+//   未验证（保留快照）：groq/mistral/perplexity/openrouter/together/fireworks/
+//     ollama/local 及各家的 defaultModel 明细
 
 export interface ProviderPreset {
   /** 唯一标准标识符（全小写） */
@@ -24,7 +32,7 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     id: "deepseek",
     name: "DeepSeek",
     defaultEndpoint: "https://api.deepseek.com/v1",
-    defaultModel: "deepseek-chat",
+    defaultModel: "deepseek-v4-flash",
     aliases: ["deepseek-ai", "deep-seek"],
     modelPatterns: [/^deepseek-(chat|reasoner|coder|v\d)/i, /^deepseek$/i],
   },
@@ -69,7 +77,7 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     id: "moonshot",
     name: "Moonshot AI (Kimi)",
     defaultEndpoint: "https://api.moonshot.cn/v1",
-    defaultModel: "moonshot-v1-8k",
+    defaultModel: "kimi-k2.6",
     aliases: ["kimi", "moonshotai"],
     modelPatterns: [/^(moonshot|kimi)/i],
   },
@@ -78,7 +86,7 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     id: "volcengine",
     name: "字节跳动火山引擎 (豆包 / Doubao)",
     defaultEndpoint: "https://ark.cn-beijing.volces.com/api/v3",
-    defaultModel: "doubao-pro-32k",
+    defaultModel: "doubao-seed-2-0-lite-260428",
     aliases: ["doubao", "volces", "bytedance", "huoshan"],
     modelPatterns: [/^(doubao|ep-)/i],
   },
@@ -176,9 +184,9 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
   {
     id: "github-models",
     name: "GitHub Models",
-    defaultEndpoint: "https://models.inference.ai.azure.com",
-    defaultModel: "gpt-4o-mini",
-    aliases: ["github", "azure-models", "gh-models"],
+    defaultEndpoint: "https://models.github.ai/inference",
+    defaultModel: "openai/gpt-4o-mini",
+    aliases: ["github", "gh-models"],
     modelPatterns: [],
   },
   // ── 19. Together AI ──
@@ -236,6 +244,9 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     modelPatterns: [],
   },
 ];
+
+/** 未识别 provider 且无显式 endpoint/model 时的兜底预设（DeepSeek） */
+export const DEFAULT_PROVIDER = PROVIDER_PRESETS[0];
 
 /**
  * 根据输入名称或别名查找匹配的 Provider 预设
@@ -309,8 +320,7 @@ export function resolveLlmEndpointAndModel(input: ResolveLlmInput = {}): Resolve
   }
 
   // 3. 最终默认 Provider（默认 DeepSeek）
-  const fallbackPreset = PROVIDER_PRESETS[0]; // deepseek
-  const effectivePreset = matchedPreset ?? fallbackPreset;
+  const effectivePreset = matchedPreset ?? DEFAULT_PROVIDER;
 
   // 确定 endpoint
   const endpoint = explicitEndpoint || effectivePreset.defaultEndpoint;

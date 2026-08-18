@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { parseConfigFile, resolveConfig } from "../../src/config/resolve";
 import { DEFAULTS } from "../../src/config/defaults";
+import { DEFAULT_PROVIDER } from "../../src/llm/providers";
 import { inputs } from "./helpers";
 
 describe("parseConfigFile", () => {
@@ -90,8 +91,8 @@ describe("resolveConfig 优先级：Action Inputs > 配置文件 > 内置默认�
     expect(resolved).toEqual({
       provider: undefined,
       providerName: undefined,
-      llmEndpoint: DEFAULTS.llmEndpoint,
-      llmModel: DEFAULTS.llmModel,
+      llmEndpoint: DEFAULT_PROVIDER.defaultEndpoint,
+      llmModel: DEFAULT_PROVIDER.defaultModel,
       isCustomEndpoint: false,
       codingPlan: DEFAULTS.codingPlan,
       language: DEFAULTS.language,

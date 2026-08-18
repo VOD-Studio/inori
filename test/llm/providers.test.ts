@@ -102,10 +102,10 @@ describe("detectProviderByModel 通过模型特征模式自动推断 Provider", 
     expect(detectProviderByModel("qwen-coder-plus")?.id).toBe("dashscope");
     expect(detectProviderByModel("qwen2.5-coder-32b-instruct")?.id).toBe("dashscope");
 
-    expect(detectProviderByModel("moonshot-v1-8k")?.id).toBe("moonshot");
+    expect(detectProviderByModel("kimi-k2.6")?.id).toBe("moonshot");
     expect(detectProviderByModel("kimi-latest")?.id).toBe("moonshot");
 
-    expect(detectProviderByModel("doubao-pro-32k")?.id).toBe("volcengine");
+    expect(detectProviderByModel("doubao-seed-2-0-lite-260428")?.id).toBe("volcengine");
     expect(detectProviderByModel("doubao-coder-pro")?.id).toBe("volcengine");
 
     expect(detectProviderByModel("deepseek-ai/DeepSeek-V3")?.id).toBe("siliconflow");
@@ -184,7 +184,7 @@ describe("resolveLlmEndpointAndModel 综合自动补全与自定义优先级", (
   it("场景 6: 完全空输入时回退到 DeepSeek 默认配置", () => {
     const res = resolveLlmEndpointAndModel({});
     expect(res.endpoint).toBe("https://api.deepseek.com/v1");
-    expect(res.model).toBe("deepseek-chat");
+    expect(res.model).toBe("deepseek-v4-flash");
     expect(res.isCustomEndpoint).toBe(false);
   });
 });

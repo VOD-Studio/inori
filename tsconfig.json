@@ -1,8 +1,8 @@
 {
   "compilerOptions": {
     "target": "ES2024",
-    "module": "CommonJS",
-    "moduleResolution": "node",
+    "module": "preserve",
+    "moduleResolution": "bundler",
     "lib": ["ES2024"],
     "outDir": "./dist",
     "rootDir": "./src",

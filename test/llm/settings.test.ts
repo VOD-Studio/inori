@@ -20,7 +20,7 @@ function minimalConfig(overrides: Partial<ResolvedConfig> = {}): ResolvedConfig 
     provider: undefined,
     providerName: undefined,
     llmEndpoint: "https://api.deepseek.com/v1",
-    llmModel: "deepseek-chat",
+    llmModel: "deepseek-v4-flash",
     isCustomEndpoint: false,
     codingPlan: true,
     language: "zh",

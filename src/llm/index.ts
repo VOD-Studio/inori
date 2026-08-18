@@ -2,7 +2,7 @@ import * as core from "@actions/core";
 import { buildPrompt } from "../core/prompt";
 import { isRetryableLlmError, LlmHttpError } from "../core/errors";
 import type { ResolvedConfig } from "../config";
-import { PROVIDER_ENV_KEYS, PROVIDER_PRESETS } from "./providers";
+import { DEFAULT_PROVIDER, PROVIDER_ENV_KEYS } from "./providers";
 
 // ── LLM 调用（OpenAI 兼容 /chat/completions）──
 
@@ -38,7 +38,7 @@ export function readLlmSettings(config: ResolvedConfig): LlmSettings {
     apiKey = process.env.LLM_API_KEY || "";
   }
   if (!apiKey) {
-    const defaultEnvKey = PROVIDER_ENV_KEYS[PROVIDER_PRESETS[0].id];
+    const defaultEnvKey = PROVIDER_ENV_KEYS[DEFAULT_PROVIDER.id];
     apiKey = defaultEnvKey ? process.env[defaultEnvKey] || "" : "";
   }
 
