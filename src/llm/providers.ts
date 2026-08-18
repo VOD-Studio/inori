@@ -46,19 +46,19 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     aliases: ["chatgpt"],
     modelPatterns: [/^(gpt-|o1|o3|chatgpt)/i],
   },
-  // ── 3. 智谱 AI (Zhipu / BigModel / GLM / CodeGeeX / Coding Plan) ──
+  // ── 3. GLM（智谱，id: zhipu）──
   {
     id: "zhipu",
-    name: "智谱 AI",
+    name: "GLM",
     defaultEndpoint: "https://open.bigmodel.cn/api/paas/v4",
     defaultModel: "glm-4.7-flash",
     aliases: ["bigmodel", "zhipuai", "glm", "codegeex"],
     modelPatterns: [/^(glm-|codegeex)/i],
   },
-  // ── 4. 阿里云百炼 / 通义千问 (DashScope / Qwen / Coding Plan) ──
+  // ── 4. Qwen（阿里云百炼，id: dashscope）──
   {
     id: "dashscope",
-    name: "阿里云百炼",
+    name: "Qwen",
     defaultEndpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1",
     defaultModel: "qwen-plus",
     aliases: ["qwen", "aliyun", "tongyi", "alibaba", "bailian"],
@@ -73,25 +73,25 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     aliases: ["silicon", "silicon-flow"],
     modelPatterns: [/^deepseek-ai\//i, /^Qwen\/Qwen2\.5-Coder/i, /^internlm\//i, /^Pro\/deepseek/i],
   },
-  // ── 6. Moonshot AI (Kimi) ──
+  // ── 6. Kimi（Moonshot AI，id: moonshot）──
   {
     id: "moonshot",
-    name: "Moonshot AI",
+    name: "Kimi",
     defaultEndpoint: "https://api.moonshot.cn/v1",
     defaultModel: "kimi-k2.6",
     aliases: ["kimi", "moonshotai"],
     modelPatterns: [/^(moonshot|kimi)/i],
   },
-  // ── 7. 字节跳动火山方舟 (Volcengine Ark / 豆包 Doubao) ──
+  // ── 7. Doubao（火山引擎方舟，id: volcengine）──
   {
     id: "volcengine",
-    name: "火山引擎",
+    name: "Doubao",
     defaultEndpoint: "https://ark.cn-beijing.volces.com/api/v3",
     defaultModel: "doubao-seed-2-0-lite-260428",
     aliases: ["doubao", "volces", "bytedance", "huoshan"],
     modelPatterns: [/^(doubao|ep-)/i],
   },
-  // ── 8. MiniMax (海螺 AI / Coding Plan) ──
+  // ── 8. MiniMax（id: minimax）──
   {
     id: "minimax",
     name: "MiniMax",
@@ -100,64 +100,64 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     aliases: ["hailuo", "abab"],
     modelPatterns: [/^(minimax|abab)/i],
   },
-  // ── 9. 百度千帆 (Baidu Qianfan / 文心一言) ──
+  // ── 9. ERNIE（百度千帆，id: baidu）──
   {
     id: "baidu",
-    name: "百度千帆",
+    name: "ERNIE",
     defaultEndpoint: "https://qianfan.baidubce.com/v2",
     defaultModel: "ernie-4.0-turbo-8k",
     aliases: ["qianfan", "ernie", "wenxin"],
     modelPatterns: [/^(ernie|eb-)/i],
   },
-  // ── 10. 腾讯混元 (Tencent Hunyuan) ──
+  // ── 10. Hunyuan（腾讯，id: tencent）──
   {
     id: "tencent",
-    name: "腾讯混元",
+    name: "Hunyuan",
     defaultEndpoint: "https://api.hunyuan.cloud.tencent.com/v1",
     defaultModel: "hunyuan-standard",
     aliases: ["hunyuan", "tencentcloud"],
     modelPatterns: [/^hunyuan/i],
   },
-  // ── 11. 零一万物 (01.AI / Yi) ──
+  // ── 11. Yi（零一万物，id: lingyi）──
   {
     id: "lingyi",
-    name: "零一万物",
+    name: "Yi",
     defaultEndpoint: "https://api.lingyiwanwu.com/v1",
     defaultModel: "yi-lightning",
     aliases: ["01.ai", "yi", "lingyiwanwu"],
     modelPatterns: [/^yi-/i],
   },
-  // ── 12. 阶跃星辰 (StepFun) ──
+  // ── 12. StepFun（阶跃星辰，id: stepfun）──
   {
     id: "stepfun",
-    name: "阶跃星辰",
+    name: "StepFun",
     defaultEndpoint: "https://api.stepfun.com/v1",
     defaultModel: "step-1-8k",
     aliases: ["step", "jieyue"],
     modelPatterns: [/^step-/i],
   },
-  // ── 13. 百川智能 (Baichuan) ──
+  // ── 13. Baichuan（百川智能，id: baichuan）──
   {
     id: "baichuan",
-    name: "百川智能",
+    name: "Baichuan",
     defaultEndpoint: "https://api.baichuan-ai.com/v1",
     defaultModel: "Baichuan4",
     aliases: ["baichuan-ai"],
     modelPatterns: [/^baichuan/i],
   },
-  // ── 14. 无问芯穹 (Infinigence AI / GenStudio) ──
+  // ── 14. InfiniAI（无问芯穹，id: infinigence）──
   {
     id: "infinigence",
-    name: "无问芯穹",
+    name: "InfiniAI",
     defaultEndpoint: "https://cloud.infini-ai.com/maas/v1",
     defaultModel: "deepseek-v3",
     aliases: ["infini", "genstudio"],
     modelPatterns: [],
   },
-  // ── 15. Anthropic (Claude / 兼容代理) ──
+  // ── 15. Claude（Anthropic，id: anthropic）──
   {
     id: "anthropic",
-    name: "Anthropic",
+    name: "Claude",
     defaultEndpoint: "https://api.anthropic.com/v1",
     defaultModel: "claude-sonnet-4-20250514",
     aliases: ["claude"],

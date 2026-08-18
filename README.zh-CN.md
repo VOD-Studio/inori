@@ -54,13 +54,13 @@ jobs:
 
 > **切换大模型服务商极简** —— 无需手动查填 URL：
 > - **DeepSeek**：`provider: deepseek`（或 `llm_model: deepseek-chat`）
-> - **智谱 AI**：`provider: zhipu`（或 `llm_model: glm-4-flash`, `codegeex-4`）
-> - **阿里云百炼 (Qwen)**：`provider: qwen`（或 `llm_model: qwen-plus`, `qwen-coder-plus`）
-> - **硅基流动 (SiliconFlow)**：`provider: siliconflow`
-> - **Moonshot (Kimi)**：`provider: kimi`（或 `llm_model: moonshot-v1-8k`）
+> - **GLM**：`provider: zhipu`（或 `llm_model: glm-4.7-flash`）
+> - **Qwen**：`provider: qwen`（或 `llm_model: qwen-plus`, `qwen3-coder-plus`）
+> - **SiliconFlow**：`provider: siliconflow`
+> - **Kimi**：`provider: kimi`（或 `llm_model: kimi-k2.6`）
 > - **OpenAI**：`provider: openai`（或 `llm_model: gpt-4o-mini`, `gpt-4o`）
-> - **Anthropic (Claude)**：`provider: anthropic`（或 `llm_model: claude-3-5-sonnet`）
-> - **Groq / OpenRouter / Mistral / Ollama / 字节火山引擎 (豆包) / MiniMax / 百度千帆 / 腾讯混元 / 零一万物 ...**（内置 24+ 主流平台）
+> - **Claude**：`provider: anthropic`（或 `llm_model: claude-sonnet-4`）
+> - **Doubao / ERNIE / Hunyuan / Yi / Groq / OpenRouter / Mistral / Ollama / MiniMax ...**（内置 24+ 主流预设）
 > - **自建代理 / 本地部署**：显式指定 `llm_endpoint: https://your-gateway/v1` 始终享有最高优先级。
 
 ## 仓库配置（`.github/inori.yml`）

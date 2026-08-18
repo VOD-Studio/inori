@@ -54,13 +54,13 @@ jobs:
 
 > **Switching providers is effortless** — no endpoint URL lookup needed:
 > - **DeepSeek**: `provider: deepseek` (or `llm_model: deepseek-chat`)
-> - **智谱 AI**: `provider: zhipu` (or `llm_model: glm-4-flash`, `codegeex-4`)
-> - **阿里云百炼 (Qwen)**: `provider: qwen` (or `llm_model: qwen-plus`, `qwen-coder-plus`)
-> - **硅基流动 (SiliconFlow)**: `provider: siliconflow`
-> - **Moonshot (Kimi)**: `provider: kimi` (or `llm_model: moonshot-v1-8k`)
+> - **GLM**: `provider: zhipu` (or `llm_model: glm-4.7-flash`)
+> - **Qwen**: `provider: qwen` (or `llm_model: qwen-plus`, `qwen3-coder-plus`)
+> - **SiliconFlow**: `provider: siliconflow`
+> - **Kimi**: `provider: kimi` (or `llm_model: kimi-k2.6`)
 > - **OpenAI**: `provider: openai` (or `llm_model: gpt-4o-mini`, `gpt-4o`)
-> - **Anthropic (Claude)**: `provider: anthropic` (or `llm_model: claude-3-5-sonnet`)
-> - **Groq / OpenRouter / Mistral / Ollama / 火山引擎 (豆包) / MiniMax / 百度千帆 / 腾讯混元 / 零一万物 ...** (All 24+ built-in presets!)
+> - **Claude**: `provider: anthropic` (or `llm_model: claude-sonnet-4`)
+> - **Doubao / ERNIE / Hunyuan / Yi / Groq / OpenRouter / Mistral / Ollama / MiniMax ...** (All 24+ built-in presets!)
 > - **Custom Proxy / Self-hosted**: Explicit `llm_endpoint: https://your-gateway/v1` always takes highest precedence.
 
 ## Configuration (`.github/inori.yml`)
