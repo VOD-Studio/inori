@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { parseConfigFile, resolveConfig } from "../../src/config/resolve";
 import { DEFAULTS } from "../../src/config/defaults";
+import { DEFAULT_PROVIDER } from "../../src/llm/providers";
 import { inputs } from "./helpers";
 
 describe("parseConfigFile", () => {
@@ -88,6 +89,12 @@ describe("resolveConfig 优先级：Action Inputs > 配置文件 > 内置默认�
   it("未设置时全部回落到 DEFAULTS", () => {
     const resolved = resolveConfig(inputs());
     expect(resolved).toEqual({
+      provider: undefined,
+      providerName: undefined,
+      llmEndpoint: DEFAULT_PROVIDER.defaultEndpoint,
+      llmModel: DEFAULT_PROVIDER.defaultModel,
+      isCustomEndpoint: false,
+      codingPlan: DEFAULTS.codingPlan,
       language: DEFAULTS.language,
       ignorePatterns: expect.any(Array),
       customInstructions: DEFAULTS.customInstructions,
@@ -101,6 +108,37 @@ describe("resolveConfig 优先级：Action Inputs > 配置文件 > 内置默认�
     // 内置忽略清单始终生效
     expect(resolved.ignorePatterns).toContain("pnpm-lock.yaml");
     expect(resolved.ignorePatterns).toContain("*.min.js");
+  });
+
+  it("配置文件指定 provider（如 zhipu）自动推断 endpoint 与默认模型", () => {
+    const resolved = resolveConfig(inputs(), { provider: "zhipu" });
+    expect(resolved.provider).toBe("zhipu");
+    expect(resolved.llmEndpoint).toBe("https://open.bigmodel.cn/api/paas/v4");
+    expect(resolved.llmModel).toBe("glm-4.7-flash");
+    expect(resolved.codingPlan).toBe(true);
+    expect(resolved.isCustomEndpoint).toBe(false);
+  });
+
+  it("Action Input 指定 provider 优先于配置文件", () => {
+    const resolved = resolveConfig(
+      inputs({ provider: "qwen" }),
+      { provider: "zhipu" }
+    );
+    expect(resolved.provider).toBe("dashscope");
+    expect(resolved.llmEndpoint).toBe("https://dashscope.aliyuncs.com/compatible-mode/v1");
+    expect(resolved.llmModel).toBe("qwen-plus");
+  });
+
+  it("显式自定义 endpoint 优先级高于自动推断", () => {
+    const resolved = resolveConfig(
+      inputs({
+        llm_endpoint: "https://my-proxy.company.com/v1",
+        llm_model: "custom-model",
+      }),
+      { provider: "zhipu" }
+    );
+    expect(resolved.llmEndpoint).toBe("https://my-proxy.company.com/v1");
+    expect(resolved.llmModel).toBe("custom-model");
   });
 
   it("非法 input 值回落：未知 on_update/语言/非数字上限", () => {

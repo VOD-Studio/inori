@@ -13,6 +13,10 @@ import { readActionInputs } from "../../src/config/actionInputs";
 
 /** 与修复后 action.yml 的 default 一致(可选 input 全部为空串) */
 const RUNNER_DEFAULTS: Record<string, string> = {
+  INPUT_PROVIDER: "",
+  INPUT_LLM_ENDPOINT: "",
+  INPUT_LLM_MODEL: "",
+  INPUT_CODING_PLAN: "",
   INPUT_LANGUAGE: "",
   INPUT_IGNORE_PATTERNS: "",
   INPUT_CUSTOM_INSTRUCTIONS: "",

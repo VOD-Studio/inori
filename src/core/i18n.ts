@@ -28,6 +28,7 @@ export const I18N = {
     othersHeading: "## 其他问题",
     noIssues: "未发现明显问题",
     truncated: "（内容过长已截断）",
+    codingPlanHeading: "💡 修复计划 (Coding Plan)",
     diffTruncated: (omittedCount: number) =>
       `... (由于长度超限，已略去后续 ${omittedCount} 个文件的 diff)`,
   },
@@ -57,6 +58,7 @@ export const I18N = {
     othersHeading: "## Other Issues",
     noIssues: "No significant issues found",
     truncated: "(content truncated due to length)",
+    codingPlanHeading: "💡 Coding Plan (Fix Suggestion)",
     diffTruncated: (omittedCount: number) =>
       `... (due to length limit, diffs of ${omittedCount} subsequent files omitted)`,
   },

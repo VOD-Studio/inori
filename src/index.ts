@@ -7,8 +7,7 @@ import { getPrDiff, postReview, type OctokitInstance, type RepoContext } from ".
 import { callLlm, readLlmSettings } from "./llm";
 
 // ── 入口：编排管道 ──
-// 配置 → 早退 → 拉 diff → LLM 评审 → 发布。
-// 各步骤实现分别位于 config/ core/ github/ llm/，依赖方向单向向下。
+// 配置（含提供商自动推断与 Coding Plan）→ 早退 → 拉 diff → LLM 评审 → 发布。
 
 interface PrPayload {
   number: number;
@@ -41,7 +40,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  const settings = readLlmSettings();
+  const settings = readLlmSettings(config);
   const token = core.getInput("github_token", { required: true });
   const octokit: OctokitInstance = github.getOctokit(token);
   const repo: RepoContext = { owner: ctx.repo.owner, repo: ctx.repo.repo };
@@ -51,10 +50,14 @@ async function main(): Promise<void> {
     core.info("无有效代码变更需评审");
     return;
   }
-  core.info(`评审 ${repo.owner}/${repo.repo} PR #${pr.number}，diff ${diff.length} 字符，模型 ${settings.model}`);
+  const providerLabel = config.providerName ? ` [${config.providerName}]` : "";
+  const endpointLabel = config.isCustomEndpoint ? "（自定义）" : "（自动填充）";
+  core.info(
+    `评审 ${repo.owner}/${repo.repo} PR #${pr.number}，diff ${diff.length} 字符，模型 ${settings.model}${providerLabel}，端点 ${settings.endpoint}${endpointLabel}`
+  );
 
   const content = await callLlm(diff, config, settings);
-  const { summary, inlines, bodyItems } = parseReviews(content, fileLines);
+  const { summary, inlines, bodyItems } = parseReviews(content, fileLines, config.language);
   // 空结果也发布「未发现问题」并替换/更新旧评审，避免上一轮的意见残留误导
   const body = buildReviewBody(
     { summary, bodyItems, model: settings.model },

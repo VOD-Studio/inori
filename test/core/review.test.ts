@@ -53,6 +53,50 @@ describe("parseReviews", () => {
     expect(r.bodyItems).toHaveLength(0);
   });
 
+
+  it("包含 coding_plan 时格式化为 Markdown 引用块", () => {
+    const json = JSON.stringify({
+      summary: "ok",
+      reviews: [
+        {
+          path: "a.ts",
+          line: 5,
+          severity: "严重",
+          comment: "未处理异常",
+          coding_plan: "1. 增加 try catch\n2. 记录错误日志",
+        },
+      ],
+    });
+    const r = parseReviews(json, fileLines, "zh");
+    expect(r.inlines[0].body).toContain("**[严重]** 未处理异常");
+    expect(r.inlines[0].body).toContain("💡 修复计划 (Coding Plan)");
+    expect(r.inlines[0].body).toContain("> 1. 增加 try catch\n> 2. 记录错误日志");
+  });
+
+  it("coding_plan 类型漂移（对象/数字/数组）不崩溃，安静降级", () => {
+    const json = JSON.stringify({
+      summary: "ok",
+      reviews: [
+        { path: "a.ts", line: 5, comment: "问题1", coding_plan: { steps: ["s"] } },
+        { path: "a.ts", line: 5, comment: "问题2", coding_plan: 42 },
+        { path: "a.ts", line: 5, comment: "问题3", coding_plan: ["1. x"] },
+      ],
+    });
+    expect(() => parseReviews(json, fileLines, "zh")).not.toThrow();
+    const r = parseReviews(json, fileLines, "zh");
+    expect(r.inlines).toHaveLength(3);
+    expect(r.inlines.every((c) => !c.body.includes("修复计划"))).toBe(true);
+  });
+
+  it("line 为字符串时不匹配行号，安静降级到 body 清单", () => {
+    const json = JSON.stringify({
+      summary: "ok",
+      reviews: [{ path: "a.ts", line: "5", comment: "问题" }],
+    });
+    const r = parseReviews(json, fileLines, "zh");
+    expect(r.inlines).toHaveLength(0);
+    expect(r.bodyItems).toHaveLength(1);
+  });
   it("非 JSON 返回原文作为 summary", () => {
     const r = parseReviews("not json", fileLines);
     expect(r.summary).toBe("not json");

@@ -1,6 +1,7 @@
 import YAML from "yaml";
 import { DEFAULTS } from "./defaults";
 import { DEFAULT_IGNORE_PATTERNS } from "../core/diff";
+import { resolveLlmEndpointAndModel } from "../llm/providers";
 import type { ActionInputs, InoriConfig, OnUpdate, ResolvedConfig } from "./types";
 import { ON_UPDATE_VALUES } from "./types";
 
@@ -85,11 +86,24 @@ function listField(raw: string, file: string[] | string | undefined): string[] {
 
 /**
  * 合并三层配置为最终生效值。
- * 规则见文件头注释；onUpdate 额外兼容 legacy 开关 keep_previous_comments
- * （仅在 on_update 未显式给出时生效）。
+ * 包含模型与 Provider 自动推断、Coding Plan 模式判断及三层配置优先级合并。
  */
 export function resolveConfig(inputs: ActionInputs, fileConfig: InoriConfig = {}): ResolvedConfig {
-  // language
+  // 1. Coding Plan 开关
+  const codingPlan = boolField(inputs.coding_plan, fileConfig.coding_plan, DEFAULTS.codingPlan);
+
+  // 2. Provider / Endpoint / Model 解析与自动推断
+  const rawProvider = strField(inputs.provider, fileConfig.provider, "");
+  const rawEndpoint = strField(inputs.llm_endpoint, fileConfig.llm_endpoint, "");
+  const rawModel = strField(inputs.llm_model, fileConfig.llm_model, "");
+
+  const llmResolved = resolveLlmEndpointAndModel({
+    provider: rawProvider,
+    endpoint: rawEndpoint,
+    model: rawModel,
+  });
+
+  // 3. language
   const language = enumField(
     inputs.language,
     ["zh", "en"],
@@ -97,13 +111,13 @@ export function resolveConfig(inputs: ActionInputs, fileConfig: InoriConfig = {}
     DEFAULTS.language
   );
 
-  // ignorePatterns: 内置默认 + 用户显式追加（input 优先于文件）
+  // 4. ignorePatterns: 内置默认 + 用户显式追加（input 优先于文件）
   const extraPatterns = listField(inputs.ignore_patterns, fileConfig.ignore_patterns);
   const ignorePatterns = Array.from(
     new Set([...DEFAULT_IGNORE_PATTERNS, ...extraPatterns])
   );
 
-  // customInstructions: 非空 input > 文件 > 空
+  // 5. customInstructions: 非空 input > 文件 > 空
   const customInstructions = strField(
     inputs.custom_instructions,
     fileConfig.custom_instructions,
@@ -122,7 +136,7 @@ export function resolveConfig(inputs: ActionInputs, fileConfig: InoriConfig = {}
     DEFAULTS.maxBodyChars
   );
 
-  // onUpdate: on_update 显式 > keep_previous_comments legacy > 文件 > 默认
+  // 6. onUpdate: on_update 显式 > keep_previous_comments legacy > 文件 > 默认
   let onUpdate = enumField(
     inputs.on_update,
     ON_UPDATE_VALUES,
@@ -140,6 +154,12 @@ export function resolveConfig(inputs: ActionInputs, fileConfig: InoriConfig = {}
   const ignoreAuthors = listField(inputs.ignore_authors, fileConfig.ignore_authors);
 
   return {
+    provider: llmResolved.provider,
+    providerName: llmResolved.providerName,
+    llmEndpoint: llmResolved.endpoint,
+    llmModel: llmResolved.model,
+    isCustomEndpoint: llmResolved.isCustomEndpoint,
+    codingPlan,
     language,
     ignorePatterns,
     customInstructions,

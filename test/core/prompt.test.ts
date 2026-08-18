@@ -54,3 +54,16 @@ describe("buildPrompt 收口纪律 (Issue 1)", () => {
     expect(p).toContain("Severity calibration");
   });
 });
+
+describe("buildPrompt Coding Plan (代码修复计划支持)", () => {
+  it("默认开启时包含 coding_plan 引导与格式要求", () => {
+    const p = buildPrompt("DIFF_CONTENT", "zh", "", true);
+    expect(p).toContain("coding_plan");
+    expect(p).toContain("actionable coding_plan");
+  });
+
+  it("显式关闭时不包含 coding_plan 字段约束", () => {
+    const p = buildPrompt("DIFF_CONTENT", "zh", "", false);
+    expect(p).not.toContain('"coding_plan":');
+  });
+});

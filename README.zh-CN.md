@@ -10,13 +10,13 @@ Inori 会分析 PR 的代码变更（diff），并将评审意见以**精准锚�
 
 ## 为什么选择 Inori
 
-- **兼容任意 OpenAI 格式端点**：DeepSeek、Moonshot (Kimi)、智谱 GLM、通义千问 Qwen、本地 Ollama 或 OpenAI 官方端点 —— 只要支持 `/chat/completions` API，Inori 即可直接接入。
+- **模型配置自动识别（精选 22 个主流提供商预设）**：无需手动查询并复制繁琐易错的 API Endpoint！直接传入 `provider: deepseek` / `qwen` / `glm` / `kimi` / `openai` / `google` / `xai`，或者仅传入 `llm_model: glm-4.7-flash` / `gpt-4o`，Inori 即可自动补全对应端点与推荐模型。同时 100% 允许自定义 `llm_endpoint`。
+- **落地可执行的修复计划（Coding Plan）**：审查发现问题时，自动生成结构化、步骤清晰的修复计划与代码重构建议，在 PR 中优雅高亮展示，开发者可直接参考采纳。
 - **精准锚定真实变更行**：每条 Inline 评论在发布前都会比对 PR 实际 diff 中的新增行（`+` 行），行号不合法的意见自动降级放入总结报告，杜绝悬空评论。
 - **收口纪律与防发散机制**：内置严格的评审纪律（够格标准、明确排除防御性穷举与教程化建议、逐字核对引文、客观校准严重度），彻底解决多轮 Re-review 模型陷入低价值挑刺和防御性穷举的问题。
 - **智能 Re-review 生命周期管理（`on_update`）**：支持灵活配置旧评审的处理方式 —— `replace`（清理旧评论重新发布）、`resolve`（通过 GraphQL 将旧评审线程标记为 Resolved 已解决）、`keep`（保留历史记录），告别红点堆叠。
 - **智能早退与安全截断**：自动识别并跳过草稿 PR（`skip_draft`）、机器人 PR（`ignore_bots`，官方 Bot 账号即登录名带 `*[bot]` 后缀或账号类型为 `type: Bot`，如 `dependabot[bot]`、`renovate[bot]`）及空变更，节省 API 预算；超长 Diff 按文件块边界安全截断，防止半截代码引发语法幻觉。
-- **支持仓库级配置文件（`.github/inori.yml`）**：支持在仓库中通过 YAML 文件对团队编码规范和评审要求进行版本化管理，保持 Workflow 极简。
-- **自带 API Key 零坐席成本**：无需购买第三方席位订阅，按需直接向模型服务商付费。
+- **支持仓库级配置文件（`.github/inori.yml`）**：支持在仓库中通过 YAML 文件对团队编码规范、提供商偏好和评审要求进行版本化管理，保持 Workflow 极简。
 
 ## 快速开始
 
@@ -47,18 +47,31 @@ jobs:
       - uses: actions/checkout@v4
       - uses: VOD-Studio/inori@v0.1.0
         with:
-          llm_endpoint: https://api.deepseek.com/v1
-          llm_model: deepseek-chat
+          provider: deepseek             # 自动识别端点与模型；也可传 `llm_model: gpt-4o` 等
           llm_api_key: ${{ secrets.DEEPSEEK_API_KEY }}
 ```
 
 3. 提交 PR，Inori 将会自动执行代码审查并发表意见。
 
-> 使用其他模型服务商？只需修改 `llm_endpoint` 和 `llm_model`：
-> - Moonshot (Kimi): `https://api.moonshot.cn/v1` / `moonshot-v1-8k`
-> - 智谱 GLM: `https://open.bigmodel.cn/api/paas/v4` / `glm-4-flash`
-> - OpenAI: `https://api.openai.com/v1` / `gpt-4o-mini`
-> - 本地 Ollama: `http://host:11434/v1` / `llama3`
+> **切换大模型服务商极简** —— 无需手动查填 URL：
+> - **DeepSeek**：`provider: deepseek`（或 `llm_model: deepseek-v4-flash`）
+> - **GLM**：`provider: zhipu`（或 `llm_model: glm-4.7-flash`）
+> - **Qwen**：`provider: qwen`（或 `llm_model: qwen-plus`, `qwen3-coder-plus`）
+> - **SiliconFlow**：`provider: siliconflow`
+> - **Kimi**：`provider: kimi`（或 `llm_model: kimi-k2.6`）
+> - **Gemini**：`provider: google`（或 `llm_model: gemini-3.7-flash`）
+> - **Grok**：`provider: xai`（或 `llm_model: grok-4.6`）
+> - **Claude**：`provider: anthropic`（或 `llm_model: claude-sonnet-4`）
+> - **Doubao / Groq / OpenRouter / Mistral / Ollama / MiniMax ...**（精选 22 个主流预设）
+>
+> **订阅套餐**（固定月费额度）使用**独立的端点与 key 体系**，与按量计费凭据**不互通**：
+> - `provider: qwen-coding` → `https://coding.dashscope.aliyuncs.com/v1`，需 `sk-sp-` 套餐 key（模型：`qwen3-coder-plus`、`kimi-k2.5`、`glm-5`、`MiniMax-M2.5` 等）
+> - `provider: glm-coding` → `https://open.bigmodel.cn/api/coding/paas/v4`（模型：`glm-5.3`）
+> - `provider: doubao-coding` → `https://ark.cn-beijing.volces.com/api/coding/v3`（模型：`ark-code-latest`，白名单含豆包/GLM/Kimi）
+> - `provider: minimax-token` → `https://api.minimaxi.com/v1`，需 `sk-cp-` 订阅 key（模型：`MiniMax-M2.7`；与按量计费共用端点，仅 key 不同）
+> DeepSeek 与 Kimi（Moonshot）官方无订阅套餐（纯按量计费）；`kimi-k2.5` 等是阿里/火山套餐白名单里聚合的第三方模型。
+> ⚠️ 注意：各平台 ToS 限制套餐 key 仅用于指定编程工具、禁止自动化 API 调用。在 CI 评审中使用可能违反条款、有封 key 风险，请自行评估。
+> - **自建代理 / 本地部署**：显式指定 `llm_endpoint: https://your-gateway/v1` 始终享有最高优先级。
 
 ## 仓库配置（`.github/inori.yml`）
 
@@ -66,12 +79,12 @@ jobs:
 
 ```yaml
 # .github/inori.yml
+provider: qwen               # 自动识别端点与推荐编程模型 (deepseek | zhipu | qwen | openai | ...)
+coding_plan: true            # 评审意见中是否附带具体的修复计划与代码建议 (默认: true)
 language: zh
 on_update: resolve          # replace | resolve | keep (默认: replace)
 skip_draft: true            # 草稿 PR 是否跳过评审 (默认: true)
 ignore_bots: true           # 机器人 PR 是否跳过评审 (默认: true)
-ignore_authors:             # 额外跳过的 PR 作者用户名
-  - "release-bot"
 ignore_patterns:            # 额外忽略的文件 glob 模式（与内置忽略规则合并）
   - "*.generated.ts"
   - "fixtures/**"
@@ -95,9 +108,11 @@ Inori 默认自动忽略以下常见非评审文件（无需在 `ignore_patterns
 
 | 参数 | 说明 | 必填 | 默认值 |
 |---|---|:---:|---|
-| `llm_endpoint` | OpenAI 兼容接口 Base URL | ✅ | — |
-| `llm_model` | 模型名称（用于 API 调用并在评审标题中展示） | ✅ | — |
-| `llm_api_key` | LLM 端点 API 密钥 | ✅ | — |
+| `provider` | 模型提供商预设（`deepseek`, `zhipu`, `qwen`, `siliconflow`, `openai`, `kimi`, `anthropic`, `groq` 等），自动补全端点与模型 | — | `deepseek` |
+| `llm_model` | 模型名称（可选，不传则按 provider 预设或模型名特征自动推断，如 `gpt-4o`, `glm-4.7-flash`） | — | 自动推断 |
+| `llm_endpoint` | 自定义 OpenAI 兼容接口 Base URL（可选，不传则自动推断） | — | 自动推断 |
+| `llm_api_key` | 大模型 API 密钥 | ✅ | — |
+| `coding_plan` | 是否在评审中生成具体的代码修复计划 (Coding Plan) 与实施步骤 | — | `true` |
 | `github_token` | 具有 `pull-requests:write` 权限的 GitHub Token | — | `${{ github.token }}` |
 | `language` | 评审意见输出语言：`zh` \| `en` | — | `zh` |
 | `ignore_patterns` | 逗号分隔的额外忽略 glob 规则（与内置规则合并） | — | — |

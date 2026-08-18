@@ -6,8 +6,8 @@ export interface ReviewItem {
   line?: number;
   severity?: string;
   comment?: string;
+  coding_plan?: string;
 }
-
 /** 通过 inline 评论发布的条目（已格式化展示文本） */
 export interface InlineComment {
   path: string;
@@ -43,7 +43,8 @@ export function extractJson(content: string): string {
  */
 export function parseReviews(
   content: string,
-  fileLines: Map<string, Set<number>>
+  fileLines: Map<string, Set<number>>,
+  lang: Lang = "zh"
 ): { summary: string; inlines: InlineComment[]; bodyItems: string[] } {
   let parsed: LlmResponse;
   try {
@@ -62,10 +63,19 @@ export function parseReviews(
     const comment = r.comment ?? "";
     if (!comment) continue;
     const severity = r.severity ?? "";
-    const text = severity ? `**[${severity}]** ${comment}` : comment;
+    let text = severity ? `**[${severity}]** ${comment}` : comment;
+    if (typeof r.coding_plan === "string" && r.coding_plan.trim()) {
+      const heading = t(lang).codingPlanHeading;
+      const planBlock = r.coding_plan
+        .trim()
+        .split("\n")
+        .map((line) => `> ${line}`)
+        .join("\n");
+      text += `\n\n> **${heading}**\n${planBlock}`;
+    }
     const line = r.line;
     const path = r.path ?? "";
-    if (line && path && fileLines.has(path) && fileLines.get(path)!.has(line)) {
+    if (typeof line === "number" && line && path && fileLines.has(path) && fileLines.get(path)!.has(line)) {
       inlines.push({ path, line, body: text });
     } else {
       bodyItems.push(path ? `- ${text}（${path}）` : `- ${text}`);

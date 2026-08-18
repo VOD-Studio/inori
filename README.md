@@ -10,13 +10,13 @@ Inori reviews your PR diff and posts findings as **inline comments anchored to r
 
 ## Why Inori
 
-- **Any OpenAI-compatible endpoint.** DeepSeek, Moonshot (Kimi), GLM, Qwen, local Ollama, or OpenAI itself — if it speaks the `/chat/completions` API, Inori works with it.
+- **22 Curated Provider Presets.** No need to look up or copy API endpoints. Simply specify `provider: deepseek` / `qwen` / `glm` / `kimi` / `openai` / `google` / `xai`, or just specify `llm_model: glm-4.7-flash` / `gpt-4o`, and Inori auto-detects the matching endpoint and model. Full custom `llm_endpoint` is always supported.
+- **Actionable Coding Plan.** Generates clear, step-by-step fix recommendations and code replacement snippets whenever a defect is found, rendered cleanly in PR comments.
 - **Inline comments on real lines.** Every comment's line number is validated against the actual diff before posting; comments that don't land on a real added line fall back to the summary instead of dangling.
 - **Review discipline & convergence.** Built-in strict review constraints prevent LLMs from degenerating into "defensive exhaustion" during multi-round re-reviews — focuses on real defects, bans unprompted defensive boilerplate suggestions, mandates verbatim quoting, and calibrates severities objectively.
 - **Smart re-reviews (`on_update`).** Configurable handling of previous review comments (`replace` to delete stale ones, `resolve` to automatically resolve threads via GraphQL, or `keep` to retain history) without messy duplicate stacking.
 - **Smart early exit & safety.** Automatically skips draft PRs, bot PRs (accounts with the official `*[bot]` login suffix or `type: Bot`, e.g. `dependabot[bot]`, `renovate[bot]`), and empty diffs to eliminate wasted API calls. Diffs are safely truncated on file boundaries to prevent LLM hallucinations from split code blocks.
-- **Repository configuration (`.github/inori.yml`).** Manage review settings, ignore rules, and team coding guidelines directly in your codebase with version control.
-
+- **Repository configuration (`.github/inori.yml`).** Manage review settings, ignore rules, provider preferences, and team coding guidelines directly in your codebase with version control.
 ## Quick start
 
 1. Add your LLM API key as a repository secret (e.g. `DEEPSEEK_API_KEY`) under **Settings → Secrets and variables → Actions**.
@@ -46,18 +46,31 @@ jobs:
       - uses: actions/checkout@v4
       - uses: VOD-Studio/inori@v0.1.0
         with:
-          llm_endpoint: https://api.deepseek.com/v1
-          llm_model: deepseek-chat
+          provider: deepseek             # Auto-detects endpoint & model; or pass `llm_model: gpt-4o`, etc.
           llm_api_key: ${{ secrets.DEEPSEEK_API_KEY }}
 ```
 
 3. Open a PR. Inori reviews it automatically.
 
-> Using a different provider? Just change `llm_endpoint` and `llm_model`:
-> - Moonshot (Kimi): `https://api.moonshot.cn/v1` / `moonshot-v1-8k`
-> - GLM: `https://open.bigmodel.cn/api/paas/v4` / `glm-4-flash`
-> - OpenAI: `https://api.openai.com/v1` / `gpt-4o-mini`
-> - Local Ollama: `http://host:11434/v1` / `llama3`
+> **Switching providers is effortless** — no endpoint URL lookup needed:
+> - **DeepSeek**: `provider: deepseek` (or `llm_model: deepseek-v4-flash`)
+> - **GLM**: `provider: zhipu` (or `llm_model: glm-4.7-flash`)
+> - **Qwen**: `provider: qwen` (or `llm_model: qwen-plus`, `qwen3-coder-plus`)
+> - **SiliconFlow**: `provider: siliconflow`
+> - **Kimi**: `provider: kimi` (or `llm_model: kimi-k2.6`)
+> - **Gemini**: `provider: google` (or `llm_model: gemini-3.7-flash`)
+> - **Grok**: `provider: xai` (or `llm_model: grok-4.6`)
+> - **Claude**: `provider: anthropic` (or `llm_model: claude-sonnet-4`)
+> - **Doubao / Groq / OpenRouter / Mistral / Ollama / MiniMax ...** (22 curated mainstream presets)
+>
+> **Subscription plans** (fixed monthly quota) use a **separate endpoint & key system** — NOT interchangeable with pay-as-you-go credentials:
+> - `provider: qwen-coding` → `https://coding.dashscope.aliyuncs.com/v1` with a `sk-sp-` key (models: `qwen3-coder-plus`, `kimi-k2.5`, `glm-5`, `MiniMax-M2.5`, ...)
+> - `provider: glm-coding` → `https://open.bigmodel.cn/api/coding/paas/v4` (model: `glm-5.3`)
+> - `provider: doubao-coding` → `https://ark.cn-beijing.volces.com/api/coding/v3` (model: `ark-code-latest`, Doubao/GLM/Kimi whitelisted)
+> - `provider: minimax-token` → `https://api.minimaxi.com/v1` with a `sk-cp-` key (model: `MiniMax-M2.7`; same endpoint as pay-as-you-go — only the key differs)
+> DeepSeek and Kimi (Moonshot) offer no subscription plans (pure pay-as-you-go); `kimi-k2.5` etc. appear inside Ali/Volcengine plan whitelists as aggregated third-party models.
+> ⚠️ Note: provider ToS restrict plan keys to designated coding tools and prohibit automated API usage. Using them in CI review may violate the terms and risk key suspension — evaluate before use.
+> - **Custom Proxy / Self-hosted**: Explicit `llm_endpoint: https://your-gateway/v1` always takes highest precedence.
 
 ## Configuration (`.github/inori.yml`)
 
@@ -65,12 +78,12 @@ In addition to Action workflow inputs, you can manage review settings, ignored p
 
 ```yaml
 # .github/inori.yml
+provider: qwen               # Auto-configures endpoint & coding model (deepseek | zhipu | qwen | openai | ...)
+coding_plan: true            # Include step-by-step fix code snippets in findings (default: true)
 language: zh
 on_update: resolve          # replace | resolve | keep (default: replace)
 skip_draft: true            # skip review when PR is a draft (default: true)
 ignore_bots: true           # skip review for bot-created PRs (default: true)
-ignore_authors:             # skip specific usernames
-  - "release-bot"
 ignore_patterns:            # additional glob patterns (merged with built-in ignores)
   - "*.generated.ts"
   - "fixtures/**"
@@ -94,9 +107,11 @@ Inori automatically ignores common non-reviewable files by default (no need to r
 
 | Input | Description | Required | Default |
 |-------|-------------|:--------:|---------|
-| `llm_endpoint` | OpenAI-compatible API base URL | ✅ | — |
-| `llm_model` | Model name (used for the API call and shown in the review title) | ✅ | — |
-| `llm_api_key` | API key for the LLM endpoint | ✅ | — |
+| `provider` | Provider preset name (`deepseek`, `zhipu`, `qwen`, `siliconflow`, `openai`, `kimi`, `anthropic`, `groq`, etc.). Auto-fills endpoint & model. | — | `deepseek` |
+| `llm_model` | Model name (optional, auto-inferred from provider preset or model name pattern, e.g. `gpt-4o`, `glm-4.7-flash`) | — | Auto-inferred |
+| `llm_endpoint` | Custom OpenAI-compatible API base URL (optional, auto-inferred when omitted) | — | Auto-inferred |
+| `llm_api_key` | API key for the LLM provider | ✅ | — |
+| `coding_plan` | Whether to generate actionable fix steps and code suggestions for issues | — | `true` |
 | `github_token` | GitHub token with `pull-requests:write`. Defaults to the workflow token. | — | `${{ github.token }}` |
 | `language` | Output language for review comments: `zh` \| `en` | — | `zh` |
 | `ignore_patterns` | Comma-separated globs of extra files to skip (in addition to built-in ignore rules) | — | — |
@@ -108,7 +123,6 @@ Inori automatically ignores common non-reviewable files by default (no need to r
 | `ignore_bots` | Skip review for bot-created PRs (official bot accounts: `*[bot]` login suffix or `type: Bot`; other automation accounts → `ignore_authors`) | — | `true` |
 | `ignore_authors` | Comma-separated PR author usernames to skip | — | — |
 | `keep_previous_comments` | Legacy switch: whether to keep previous comments (alias for `on_update: keep`) | — | `false` |
-
 ## How it works
 
 1. **Smart early exits**: Evaluates PR metadata to skip execution for drafts (`skip_draft: true`), bot PRs (`ignore_bots: true`), or designated authors (`ignore_authors`), saving API budget. Add `ready_for_review` to your `pull_request` trigger types so draft PRs get reviewed once marked ready.
