@@ -1,7 +1,7 @@
-import { readActionInputs } from "./actionInputs";
-import { loadRepoConfigFile } from "./repoConfig";
-import { resolveConfig } from "./resolve";
-import type { ResolvedConfig } from "./types";
+import { readActionInputs } from './actionInputs'
+import { loadRepoConfigFile } from './repoConfig'
+import { resolveConfig } from './resolve'
+import type { ResolvedConfig } from './types'
 
 // ── 配置层对外唯一入口 ──
 // 调用方（index.ts）只需要 loadConfig()：背后是
@@ -9,10 +9,10 @@ import type { ResolvedConfig } from "./types";
 
 /** 读取并合并全部配置（Action Inputs > .github/inori.yml > DEFAULTS） */
 export function loadConfig(): ResolvedConfig {
-  return resolveConfig(readActionInputs(), loadRepoConfigFile());
+  return resolveConfig(readActionInputs(), loadRepoConfigFile())
 }
 
-export type { ResolvedConfig, InoriConfig, OnUpdate, ActionInputs } from "./types";
-export { ON_UPDATE_VALUES } from "./types";
-export { DEFAULTS } from "./defaults";
-export { parseConfigFile, resolveConfig, parseStringList } from "./resolve";
+export { DEFAULTS } from './defaults'
+export { parseConfigFile, parseStringList, resolveConfig } from './resolve'
+export type { ActionInputs, InoriConfig, OnUpdate, ResolvedConfig } from './types'
+export { ON_UPDATE_VALUES } from './types'

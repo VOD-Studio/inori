@@ -1,5 +1,4 @@
-import type { ResolvedConfig } from "./types";
-import type { Lang } from "../core/i18n";
+import type { ResolvedConfig } from './types'
 
 // ── 内置默认值（单一事实来源）──
 // action.yml 的可选 input 一律不写 default（由 runner 注入空串），
@@ -12,27 +11,27 @@ import type { Lang } from "../core/i18n";
 /** 需要内置默认值的 ResolvedConfig 字段（LLM 三项由 providers.ts 推断） */
 type DefaultFields = Pick<
   ResolvedConfig,
-  | "codingPlan"
-  | "language"
-  | "maxDiffChars"
-  | "maxBodyChars"
-  | "onUpdate"
-  | "skipDraft"
-  | "ignoreBots"
-  | "ignoreAuthors"
-  | "ignorePatterns"
-  | "customInstructions"
->;
+  | 'codingPlan'
+  | 'language'
+  | 'maxDiffChars'
+  | 'maxBodyChars'
+  | 'onUpdate'
+  | 'skipDraft'
+  | 'ignoreBots'
+  | 'ignoreAuthors'
+  | 'ignorePatterns'
+  | 'customInstructions'
+>
 
 export const DEFAULTS = {
   codingPlan: true,
-  language: "zh",
+  language: 'zh',
   maxDiffChars: 40000,
   maxBodyChars: 60000,
-  onUpdate: "replace",
+  onUpdate: 'replace',
   skipDraft: true,
   ignoreBots: true,
   ignoreAuthors: [] as string[],
   ignorePatterns: [] as string[],
-  customInstructions: "",
-} as const satisfies DefaultFields;
+  customInstructions: '',
+} as const satisfies DefaultFields

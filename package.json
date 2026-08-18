@@ -6,7 +6,8 @@
   "scripts": {
     "build": "ncc build src/index.ts -o dist --source-map --license licenses.txt",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "lint": "biome check"
   },
   "repository": {
     "type": "git",
@@ -21,6 +22,7 @@
     "yaml": "^2.9.0"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.5.9",
     "@types/node": "^24.0.0",
     "@vercel/ncc": "^0.38.1",
     "typescript": "^5.4.0",
