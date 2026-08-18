@@ -24,9 +24,9 @@ inputs:
     required: false
     default: 'zh'
   ignore_patterns:
-    description: 'Comma-separated glob patterns of files to skip (lockfiles, changelogs, etc.)'
+    description: 'Comma-separated glob patterns of additional files to skip (built-in defaults include lockfiles, minified files, svg, etc.)'
     required: false
-    default: 'pnpm-lock.yaml,go.sum,package-lock.json,yarn.lock,CHANGELOG.md'
+    default: ''
   max_diff_chars:
     description: 'Character limit before the diff is truncated (controls LLM context cost)'
     required: false
@@ -39,7 +39,26 @@ inputs:
     description: 'Extra review rules appended to the prompt (team conventions, banned APIs, etc.)'
     required: false
     default: ''
-
+  on_update:
+    description: 'How to handle previous review comments on re-review: replace | resolve | keep'
+    required: false
+    default: 'replace'
+  keep_previous_comments:
+    description: 'Legacy switch: whether to keep previous inline comments without deletion (equivalent to on_update: keep)'
+    required: false
+    default: 'false'
+  skip_draft:
+    description: 'Skip review when the pull request is in draft status'
+    required: false
+    default: 'true'
+  ignore_bots:
+    description: 'Skip review for bot-created pull requests'
+    required: false
+    default: 'true'
+  ignore_authors:
+    description: 'Comma-separated list of PR author usernames to skip'
+    required: false
+    default: ''
 runs:
   using: 'node24'
   main: 'dist/index.js'

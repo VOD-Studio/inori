@@ -1,3 +1,5 @@
+import * as fs from "fs";
+import * as path from "path";
 import * as core from "@actions/core";
 import * as github from "@actions/github";
 import { GitHub } from "@actions/github/lib/utils";
@@ -7,49 +9,66 @@ import {
   parseReviews,
   buildPrompt,
   buildReviewBody,
+  formatDiffAndTruncate,
+  parseConfigFile,
+  resolveConfig,
+  shouldSkipReview,
   REVIEW_MARKER,
   LlmHttpError,
   isRetryableLlmError,
   type PrFile,
   type InlineComment,
+  type InoriConfig,
+  type ResolvedConfig,
 } from "./logic";
 
 /** getOctokit 返回的实例类型，带 rest API 与分页能力 */
 type OctokitInstance = InstanceType<typeof GitHub>;
 
-// ── 配置（从 action inputs 读取）──
+// ── 配置读取 ──
+
+function loadRepoConfigFile(workspaceDir = process.cwd()): InoriConfig {
+  const candidateFiles = [
+    path.join(workspaceDir, ".github", "inori.yml"),
+    path.join(workspaceDir, ".github", "inori.yaml"),
+  ];
+  for (const filePath of candidateFiles) {
+    if (fs.existsSync(filePath)) {
+      try {
+        core.info(`读取仓库配置文件：${filePath}`);
+        const content = fs.readFileSync(filePath, "utf-8");
+        return parseConfigFile(content);
+      } catch (e) {
+        core.warning(`解析配置文件 ${filePath} 失败：${(e as Error).message}`);
+      }
+    }
+  }
+  return {};
+}
 
 const LLM_ENDPOINT = core.getInput("llm_endpoint", { required: true }).replace(/\/+$/, "");
 const LLM_MODEL = core.getInput("llm_model", { required: true });
 const LLM_API_KEY = core.getInput("llm_api_key", { required: true });
 const GITHUB_TOKEN = core.getInput("github_token", { required: true });
-const LANGUAGE = (core.getInput("language") || "zh").toLowerCase() as "zh" | "en";
-const IGNORE_PATTERNS = core.getInput("ignore_patterns")
-  .split(",")
-  .map((p) => p.trim())
-  .filter(Boolean);
-const MAX_DIFF_CHARS = parseInt(core.getInput("max_diff_chars") || "40000", 10);
-const MAX_BODY_CHARS = parseInt(core.getInput("max_body_chars") || "60000", 10);
-const CUSTOM_INSTRUCTIONS = core.getInput("custom_instructions");
 
 // 单次 LLM 调用 5 分钟上限，端点挂起时及时中止而不是卡满整个 job
 const LLM_TIMEOUT_MS = 300_000;
 // 429/5xx/超时/网络错误的退避重试次数
 const MAX_LLM_RETRIES = 3;
-
 // ── IO：拉取 diff ──
 
 /**
- * 分页拉取 PR 全部文件（GitHub API 单页上限 100），拼接 diff，
+ * 分页拉取 PR 全部文件（GitHub API 单页上限 100），经过过滤与安全文件块截断，
  * 返回 diff 文本与各文件新增行号集合（用于 inline 锚点校验）。
  */
 async function getPrDiff(
   octokit: OctokitInstance,
   repo: { owner: string; repo: string },
-  prNumber: number
+  prNumber: number,
+  config: ResolvedConfig
 ): Promise<{ diff: string; fileLines: Map<string, Set<number>> }> {
   const fileLines = new Map<string, Set<number>>();
-  const chunks: string[] = [];
+  const validFiles: { filename: string; patch: string }[] = [];
   let page = 1;
   let files: PrFile[] = [];
 
@@ -62,26 +81,38 @@ async function getPrDiff(
     });
     files = resp.data as PrFile[];
     for (const f of files) {
-      if (isIgnored(f.filename, IGNORE_PATTERNS)) {
+      if (isIgnored(f.filename, config.ignorePatterns)) {
         core.info(`忽略 ${f.filename}`);
         continue;
       }
       const patch = f.patch ?? "";
       if (!patch) continue;
-      fileLines.set(f.filename, addedLines(patch));
-      chunks.push(`--- ${f.filename}\n${patch}`);
+      validFiles.push({ filename: f.filename, patch });
     }
     page += 1;
   } while (files.length === 100);
 
-  let diff = chunks.join("\n");
-  if (diff.length > MAX_DIFF_CHARS) {
-    core.info(`diff 过大（${diff.length} 字符），截断到 ${MAX_DIFF_CHARS}`);
-    diff = diff.slice(0, MAX_DIFF_CHARS);
-    // 截断后模型可能针对未见代码给行号，禁用 inline 锚定全部走 body
-    fileLines.clear();
+  const truncatedResult = formatDiffAndTruncate(
+    validFiles,
+    config.maxDiffChars,
+    config.language
+  );
+
+  if (truncatedResult.truncated) {
+    core.info(
+      `diff 过大，已按文件块安全截断到 ${config.maxDiffChars} 字符以内（略去后续 ${truncatedResult.omittedCount} 个文件）`
+    );
   }
-  return { diff, fileLines };
+
+  // 仅对被保留在 diff 中的文件建立行号映射
+  const includedSet = new Set(truncatedResult.includedFiles);
+  for (const f of validFiles) {
+    if (includedSet.has(f.filename)) {
+      fileLines.set(f.filename, addedLines(f.patch));
+    }
+  }
+
+  return { diff: truncatedResult.diff, fileLines };
 }
 
 // ── IO：调用 LLM ──
@@ -116,8 +147,8 @@ async function chatCompletions(body: Record<string, unknown>): Promise<string> {
  * - 部分兼容端点不支持 response_format（通常报 400），自动去掉该参数重试一次；
  * - 429/5xx/超时/网络错误按指数退避重试，最多 MAX_LLM_RETRIES 次。
  */
-async function callLlm(diff: string): Promise<string> {
-  const prompt = buildPrompt(diff, LANGUAGE, CUSTOM_INSTRUCTIONS);
+async function callLlm(diff: string, config: ResolvedConfig): Promise<string> {
+  const prompt = buildPrompt(diff, config.language, config.customInstructions);
   const body: Record<string, unknown> = {
     model: LLM_MODEL,
     messages: [{ role: "user", content: prompt }],
@@ -187,6 +218,106 @@ async function deleteOldInlineComments(
   }
 }
 
+/**
+ * 将上一轮 inori 创建且未被人工回复的 review threads 标记为 Resolved。
+ */
+async function resolveOldInlineThreads(
+  octokit: OctokitInstance,
+  repo: { owner: string; repo: string },
+  prNumber: number
+): Promise<void> {
+  let cursor: string | null = null;
+  let hasNextPage = true;
+
+  while (hasNextPage) {
+    const data = (await octokit.graphql(
+      `
+      query($owner: String!, $repo: String!, $prNumber: Int!, $cursor: String) {
+        repository(owner: $owner, name: $repo) {
+          pullRequest(number: $prNumber) {
+            reviewThreads(first: 100, after: $cursor) {
+              pageInfo {
+                hasNextPage
+                endCursor
+              }
+              nodes {
+                id
+                isResolved
+                comments(first: 100) {
+                  nodes {
+                    id
+                    body
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    `,
+      {
+        owner: repo.owner,
+        repo: repo.repo,
+        prNumber,
+        cursor,
+      }
+    )) as {
+      repository?: {
+        pullRequest?: {
+          reviewThreads?: {
+            pageInfo?: {
+              hasNextPage: boolean;
+              endCursor: string | null;
+            };
+            nodes?: {
+              id: string;
+              isResolved: boolean;
+              comments?: {
+                nodes?: {
+                  id: string;
+                  body: string;
+                }[];
+              };
+            }[];
+          };
+        };
+      };
+    };
+
+    const threads = data.repository?.pullRequest?.reviewThreads?.nodes ?? [];
+    for (const thread of threads) {
+      if (thread.isResolved) continue;
+      const comments = thread.comments?.nodes ?? [];
+      if (comments.length === 0) continue;
+      const firstComment = comments[0];
+      if (firstComment.body.includes(REVIEW_MARKER) && comments.length === 1) {
+        try {
+          await octokit.graphql(
+            `
+            mutation($threadId: ID!) {
+              resolveReviewThread(input: { threadId: $threadId }) {
+                thread {
+                  id
+                  isResolved
+                }
+              }
+            }
+          `,
+            { threadId: thread.id }
+          );
+          core.info(`已将历史评审线程 ${thread.id} 标记为已解决 (Resolved)`);
+        } catch (e) {
+          core.warning(`标记评审线程 ${thread.id} 已解决失败：${(e as Error).message}`);
+        }
+      }
+    }
+
+    const pageInfo = data.repository?.pullRequest?.reviewThreads?.pageInfo;
+    hasNextPage = pageInfo?.hasNextPage ?? false;
+    cursor = pageInfo?.endCursor ?? null;
+  }
+}
+
 /** 找到最近一轮 inori 评审的 id（body 内嵌标记识别），无则返回 null */
 async function findOldReviewId(
   octokit: OctokitInstance,
@@ -224,14 +355,22 @@ async function postReview(
   prNumber: number,
   headSha: string,
   body: string,
-  inlines: InlineComment[]
+  inlines: InlineComment[],
+  onUpdate: "replace" | "resolve" | "keep"
 ): Promise<void> {
-  try {
-    await deleteOldInlineComments(octokit, repo, prNumber);
-  } catch (e) {
-    core.warning(`清理旧 inline 评论失败，继续发布：${(e as Error).message}`);
+  if (onUpdate === "replace") {
+    try {
+      await deleteOldInlineComments(octokit, repo, prNumber);
+    } catch (e) {
+      core.warning(`清理旧 inline 评论失败，继续发布：${(e as Error).message}`);
+    }
+  } else if (onUpdate === "resolve") {
+    try {
+      await resolveOldInlineThreads(octokit, repo, prNumber);
+    } catch (e) {
+      core.warning(`解决旧 inline 评审线程失败，继续发布：${(e as Error).message}`);
+    }
   }
-
   let posted = false;
   try {
     const oldId = await findOldReviewId(octokit, repo, prNumber);
@@ -285,24 +424,58 @@ async function main(): Promise<void> {
   }
   const pr = ctx.payload.pull_request as {
     number: number;
+    draft?: boolean;
+    user?: { login: string; type?: string };
     head: { sha: string };
   };
+
+  const fileConfig = loadRepoConfigFile();
+  const config = resolveConfig(
+    {
+      language: core.getInput("language"),
+      ignore_patterns: core.getInput("ignore_patterns"),
+      custom_instructions: core.getInput("custom_instructions"),
+      max_diff_chars: core.getInput("max_diff_chars"),
+      max_body_chars: core.getInput("max_body_chars"),
+      on_update: core.getInput("on_update"),
+      keep_previous_comments: core.getInput("keep_previous_comments"),
+      skip_draft: core.getInput("skip_draft"),
+      ignore_bots: core.getInput("ignore_bots"),
+      ignore_authors: core.getInput("ignore_authors"),
+    },
+    fileConfig
+  );
+
+  // 智能早退检查（草稿 PR、Bot PR、忽略作者）
+  const skipCheck = shouldSkipReview({
+    isDraft: pr.draft,
+    skipDraft: config.skipDraft,
+    author: pr.user,
+    ignoreBots: config.ignoreBots,
+    ignoreAuthors: config.ignoreAuthors,
+    lang: config.language,
+  });
+  if (skipCheck.skip) {
+    core.info(skipCheck.reason ?? "跳过评审");
+    return;
+  }
+
   const octokit = github.getOctokit(GITHUB_TOKEN);
   const repo = { owner: ctx.repo.owner, repo: ctx.repo.repo };
 
-  const { diff, fileLines } = await getPrDiff(octokit, repo, pr.number);
-  if (!diff) {
-    core.info("没有可评审的 diff");
+  const { diff, fileLines } = await getPrDiff(octokit, repo, pr.number, config);
+  if (!diff || diff.trim().length === 0) {
+    core.info("无有效代码变更需评审");
     return;
   }
   core.info(`评审 ${ctx.repo.owner}/${ctx.repo.repo} PR #${pr.number}，diff ${diff.length} 字符，模型 ${LLM_MODEL}`);
 
-  const content = await callLlm(diff);
+  const content = await callLlm(diff, config);
   const { summary, inlines, bodyItems } = parseReviews(content, fileLines);
-  // 空结果也发布「未发现问题」并替换旧评审，避免上一轮的意见残留误导
-  const body = buildReviewBody({ summary, bodyItems, model: LLM_MODEL }, LANGUAGE, MAX_BODY_CHARS);
+  // 空结果也发布「未发现问题」并替换/更新旧评审，避免上一轮的意见残留误导
+  const body = buildReviewBody({ summary, bodyItems, model: LLM_MODEL }, config.language, config.maxBodyChars);
 
-  await postReview(octokit, repo, pr.number, pr.head.sha, body, inlines);
+  await postReview(octokit, repo, pr.number, pr.head.sha, body, inlines, config.onUpdate);
   core.info("评审已发布");
 }
 
