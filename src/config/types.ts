@@ -56,6 +56,8 @@ export interface ResolvedConfig {
   llmEndpoint: string;
   /** 最终生效的 LLM Model 名称 */
   llmModel: string;
+  /** endpoint 是否由用户显式自定义（false = 预设或自动推断填充） */
+  isCustomEndpoint: boolean;
   /** 是否启用 Coding Plan / 结构化修复计划模式 */
   codingPlan: boolean;
   language: Lang;

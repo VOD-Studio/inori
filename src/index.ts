@@ -51,8 +51,9 @@ async function main(): Promise<void> {
     return;
   }
   const providerLabel = config.providerName ? ` [${config.providerName}]` : "";
+  const endpointLabel = config.isCustomEndpoint ? "（自定义）" : "（自动填充）";
   core.info(
-    `评审 ${repo.owner}/${repo.repo} PR #${pr.number}，diff ${diff.length} 字符，模型 ${settings.model}${providerLabel}，端点 ${settings.endpoint}`
+    `评审 ${repo.owner}/${repo.repo} PR #${pr.number}，diff ${diff.length} 字符，模型 ${settings.model}${providerLabel}，端点 ${settings.endpoint}${endpointLabel}`
   );
 
   const content = await callLlm(diff, config, settings);

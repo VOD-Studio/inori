@@ -2,6 +2,7 @@ import * as core from "@actions/core";
 import { buildPrompt } from "../core/prompt";
 import { isRetryableLlmError, LlmHttpError } from "../core/errors";
 import type { ResolvedConfig } from "../config";
+import { PROVIDER_ENV_KEYS, PROVIDER_PRESETS } from "./providers";
 
 // ── LLM 调用（OpenAI 兼容 /chat/completions）──
 
@@ -23,25 +24,29 @@ function delay(ms: number): Promise<void> {
 }
 
 /**
- * 根据已解析配置（含自动推断与自定义）与环境密钥构造 LLM 调用设置
+ * 根据已解析配置（含自动推断与自定义）与环境密钥构造 LLM 调用设置。
+ * API Key 查找顺序：llm_api_key input > 推断 provider 的专属环境变量
+ * （如 ZHIPU_API_KEY）> 通用 LLM_API_KEY > 默认 provider（deepseek）专属变量。
+ * 不做跨 provider 乱序兜底，避免拿 A 家的 key 打 B 家端点。
  */
 export function readLlmSettings(config: ResolvedConfig): LlmSettings {
-  // 优先从 llm_api_key 读取，若为空可从常见环境变量兜底
   let apiKey = core.getInput("llm_api_key");
+  if (!apiKey && config.provider) {
+    apiKey = process.env[PROVIDER_ENV_KEYS[config.provider]] ?? "";
+  }
   if (!apiKey) {
-    apiKey =
-      process.env.LLM_API_KEY ||
-      process.env.OPENAI_API_KEY ||
-      process.env.DEEPSEEK_API_KEY ||
-      process.env.ZHIPU_API_KEY ||
-      process.env.DASHSCOPE_API_KEY ||
-      "";
+    apiKey = process.env.LLM_API_KEY || "";
+  }
+  if (!apiKey) {
+    const defaultEnvKey = PROVIDER_ENV_KEYS[PROVIDER_PRESETS[0].id];
+    apiKey = defaultEnvKey ? process.env[defaultEnvKey] || "" : "";
   }
 
   if (!apiKey) {
-    throw new Error(
-      "缺少 LLM API Key：请在 Action with 中配置 llm_api_key 或设置 secrets/环境变量"
-    );
+    const hint = config.provider
+      ? `（当前 provider: ${config.providerName ?? config.provider}，可设置 ${PROVIDER_ENV_KEYS[config.provider] ?? "LLM_API_KEY"}）`
+      : "（可设置 LLM_API_KEY 或 DEEPSEEK_API_KEY）";
+    throw new Error(`缺少 LLM API Key：请在 Action with 中配置 llm_api_key 或设置环境变量${hint}`);
   }
 
   return {

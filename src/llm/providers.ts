@@ -1,5 +1,5 @@
 // ── 大模型提供商预设与自动推断引擎 ──
-// 内置主流全球与国内提供商预设、Coding Plan 专用端点与模型推荐，
+// 内置主流全球与国内提供商预设，
 // 支持通过 provider 名称、别名或模型名前缀自动补全 endpoint 与推荐模型，
 // 同时 100% 支持用户自定义 endpoint 与 model。
 
@@ -12,8 +12,6 @@ export interface ProviderPreset {
   defaultEndpoint: string;
   /** 默认推荐通用模型 */
   defaultModel: string;
-  /** 推荐的 Coding Plan / 代码审查优化模型（若有） */
-  codingPlanModel?: string;
   /** 常见别名，用户输入时自动归一化 */
   aliases?: string[];
   /** 用于从模型名称自动推断所属 Provider 的正则模式 */
@@ -27,7 +25,6 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     name: "DeepSeek",
     defaultEndpoint: "https://api.deepseek.com/v1",
     defaultModel: "deepseek-chat",
-    codingPlanModel: "deepseek-chat",
     aliases: ["deepseek-ai", "deep-seek"],
     modelPatterns: [/^deepseek-(chat|reasoner|coder|v\d)/i, /^deepseek$/i],
   },
@@ -37,7 +34,6 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     name: "OpenAI",
     defaultEndpoint: "https://api.openai.com/v1",
     defaultModel: "gpt-4o-mini",
-    codingPlanModel: "gpt-4o",
     aliases: ["chatgpt"],
     modelPatterns: [/^(gpt-|o1|o3|chatgpt)/i],
   },
@@ -47,7 +43,6 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     name: "智谱 AI (GLM / CodeGeeX)",
     defaultEndpoint: "https://open.bigmodel.cn/api/paas/v4",
     defaultModel: "glm-4-flash",
-    codingPlanModel: "codegeex-4",
     aliases: ["bigmodel", "zhipuai", "glm", "codegeex"],
     modelPatterns: [/^(glm-|codegeex)/i],
   },
@@ -57,7 +52,6 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     name: "阿里云百炼 (通义千问 / Qwen)",
     defaultEndpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1",
     defaultModel: "qwen-plus",
-    codingPlanModel: "qwen-coder-plus",
     aliases: ["qwen", "aliyun", "tongyi", "alibaba", "bailian"],
     modelPatterns: [/^(qwen-|qwen2\.|qwen2\.5-|tongyi)/i],
   },
@@ -67,7 +61,6 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     name: "硅基流动 (SiliconFlow)",
     defaultEndpoint: "https://api.siliconflow.cn/v1",
     defaultModel: "deepseek-ai/DeepSeek-V3",
-    codingPlanModel: "Qwen/Qwen2.5-Coder-32B-Instruct",
     aliases: ["silicon", "silicon-flow"],
     modelPatterns: [/^deepseek-ai\//i, /^Qwen\/Qwen2\.5-Coder/i, /^internlm\//i, /^Pro\/deepseek/i],
   },
@@ -77,7 +70,6 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     name: "Moonshot AI (Kimi)",
     defaultEndpoint: "https://api.moonshot.cn/v1",
     defaultModel: "moonshot-v1-8k",
-    codingPlanModel: "moonshot-v1-32k",
     aliases: ["kimi", "moonshotai"],
     modelPatterns: [/^(moonshot|kimi)/i],
   },
@@ -87,7 +79,6 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     name: "字节跳动火山引擎 (豆包 / Doubao)",
     defaultEndpoint: "https://ark.cn-beijing.volces.com/api/v3",
     defaultModel: "doubao-pro-32k",
-    codingPlanModel: "doubao-coder-pro",
     aliases: ["doubao", "volces", "bytedance", "huoshan"],
     modelPatterns: [/^(doubao|ep-)/i],
   },
@@ -97,7 +88,6 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     name: "MiniMax (海螺 AI)",
     defaultEndpoint: "https://api.minimax.chat/v1",
     defaultModel: "MiniMax-Text-01",
-    codingPlanModel: "MiniMax-Text-01",
     aliases: ["hailuo", "abab"],
     modelPatterns: [/^(minimax|abab)/i],
   },
@@ -107,7 +97,6 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     name: "百度智能云千帆",
     defaultEndpoint: "https://qianfan.baidubce.com/v2",
     defaultModel: "ernie-4.0-turbo-8k",
-    codingPlanModel: "ernie-4.0-turbo-8k",
     aliases: ["qianfan", "ernie", "wenxin"],
     modelPatterns: [/^(ernie|eb-)/i],
   },
@@ -117,7 +106,6 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     name: "腾讯混元 (Tencent Hunyuan)",
     defaultEndpoint: "https://api.hunyuan.cloud.tencent.com/v1",
     defaultModel: "hunyuan-standard",
-    codingPlanModel: "hunyuan-code",
     aliases: ["hunyuan", "tencentcloud"],
     modelPatterns: [/^hunyuan/i],
   },
@@ -127,7 +115,6 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     name: "零一万物 (01.AI / Yi)",
     defaultEndpoint: "https://api.lingyiwanwu.com/v1",
     defaultModel: "yi-lightning",
-    codingPlanModel: "yi-lightning",
     aliases: ["01.ai", "yi", "lingyiwanwu"],
     modelPatterns: [/^yi-/i],
   },
@@ -137,7 +124,6 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     name: "阶跃星辰 (StepFun)",
     defaultEndpoint: "https://api.stepfun.com/v1",
     defaultModel: "step-1-8k",
-    codingPlanModel: "step-1-32k",
     aliases: ["step", "jieyue"],
     modelPatterns: [/^step-/i],
   },
@@ -147,7 +133,6 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     name: "百川智能 (Baichuan)",
     defaultEndpoint: "https://api.baichuan-ai.com/v1",
     defaultModel: "Baichuan4",
-    codingPlanModel: "Baichuan4",
     aliases: ["baichuan-ai"],
     modelPatterns: [/^baichuan/i],
   },
@@ -157,7 +142,6 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     name: "无问芯穹 (Infinigence AI)",
     defaultEndpoint: "https://cloud.infini-ai.com/maas/v1",
     defaultModel: "deepseek-v3",
-    codingPlanModel: "qwen2.5-coder-32b-instruct",
     aliases: ["infini", "genstudio"],
     modelPatterns: [],
   },
@@ -167,7 +151,6 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     name: "Anthropic (Claude)",
     defaultEndpoint: "https://api.anthropic.com/v1",
     defaultModel: "claude-3-5-sonnet-20241022",
-    codingPlanModel: "claude-3-7-sonnet-20250219",
     aliases: ["claude"],
     modelPatterns: [/^claude/i],
   },
@@ -177,7 +160,6 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     name: "OpenRouter",
     defaultEndpoint: "https://openrouter.ai/api/v1",
     defaultModel: "deepseek/deepseek-chat",
-    codingPlanModel: "anthropic/claude-3.5-sonnet",
     aliases: ["open-router"],
     modelPatterns: [/^openrouter\//i],
   },
@@ -187,7 +169,6 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     name: "Groq",
     defaultEndpoint: "https://api.groq.com/openai/v1",
     defaultModel: "llama-3.3-70b-versatile",
-    codingPlanModel: "llama-3.3-70b-versatile",
     aliases: [],
     modelPatterns: [/^(llama-|mixtral-|gemma-)/i],
   },
@@ -197,7 +178,6 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     name: "GitHub Models",
     defaultEndpoint: "https://models.inference.ai.azure.com",
     defaultModel: "gpt-4o-mini",
-    codingPlanModel: "gpt-4o",
     aliases: ["github", "azure-models", "gh-models"],
     modelPatterns: [],
   },
@@ -207,7 +187,6 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     name: "Together AI",
     defaultEndpoint: "https://api.together.xyz/v1",
     defaultModel: "deepseek-ai/DeepSeek-V3",
-    codingPlanModel: "Qwen/Qwen2.5-Coder-32B-Instruct",
     aliases: ["together-ai", "togetherai"],
     modelPatterns: [/^meta-llama\//i, /^togethercomputer\//i],
   },
@@ -217,7 +196,6 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     name: "Fireworks AI",
     defaultEndpoint: "https://api.fireworks.ai/inference/v1",
     defaultModel: "accounts/fireworks/models/deepseek-v3",
-    codingPlanModel: "accounts/fireworks/models/deepseek-v3",
     aliases: ["fireworks-ai"],
     modelPatterns: [/^accounts\/fireworks\//i],
   },
@@ -227,7 +205,6 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     name: "Mistral AI",
     defaultEndpoint: "https://api.mistral.ai/v1",
     defaultModel: "codestral-latest",
-    codingPlanModel: "codestral-latest",
     aliases: ["mistralai", "codestral"],
     modelPatterns: [/^(mistral|codestral|pixtral)/i],
   },
@@ -237,7 +214,6 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     name: "Perplexity",
     defaultEndpoint: "https://api.perplexity.ai",
     defaultModel: "sonar",
-    codingPlanModel: "sonar-pro",
     aliases: ["pplx"],
     modelPatterns: [/^sonar/i],
   },
@@ -247,7 +223,6 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     name: "Ollama (Local / Self-hosted)",
     defaultEndpoint: "http://localhost:11434/v1",
     defaultModel: "llama3",
-    codingPlanModel: "qwen2.5-coder",
     aliases: ["local-ollama"],
     modelPatterns: [/^ollama\//i],
   },
@@ -257,7 +232,6 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     name: "Local OpenAI-Compatible Server (vLLM / LMStudio)",
     defaultEndpoint: "http://localhost:8000/v1",
     defaultModel: "default",
-    codingPlanModel: "default",
     aliases: ["vllm", "lmstudio", "custom-local"],
     modelPatterns: [],
   },
@@ -312,14 +286,12 @@ export interface ResolveLlmInput {
   endpoint?: string;
   /** 显式指定的模型名称 */
   model?: string;
-  /** 是否启用 Coding Plan 优化模式（若启用，自动选用该平台推荐的代码模型） */
-  enableCodingPlan?: boolean;
 }
 
 /**
  * 解析并自动补全 LLM Endpoint 与 Model 配置：
  * 1. 显式 endpoint 优先级最高（支持完全自定义）；
- * 2. 若指定 provider，自动使用其默认 endpoint 与模型（Coding Plan 模式下优先取 codingPlanModel）；
+ * 2. 若指定 provider，自动使用其默认 endpoint 与模型；
  * 3. 若未指定 provider 但指定了 model，通过模型特征自动推断所属 provider 及对应 endpoint；
  * 4. 若均未指定，默认回退到 DeepSeek 官方预设。
  */
@@ -327,7 +299,6 @@ export function resolveLlmEndpointAndModel(input: ResolveLlmInput = {}): Resolve
   const explicitEndpoint = input.endpoint ? input.endpoint.trim().replace(/\/+$/, "") : "";
   const explicitModel = input.model ? input.model.trim() : "";
   const explicitProvider = input.provider ? input.provider.trim() : "";
-  const useCoding = input.enableCodingPlan ?? true;
 
   // 1. 显式通过 provider 查找
   let matchedPreset = findProvider(explicitProvider);
@@ -348,11 +319,7 @@ export function resolveLlmEndpointAndModel(input: ResolveLlmInput = {}): Resolve
   // 确定 model
   let model = explicitModel;
   if (!model) {
-    if (useCoding && effectivePreset.codingPlanModel) {
-      model = effectivePreset.codingPlanModel;
-    } else {
-      model = effectivePreset.defaultModel;
-    }
+    model = effectivePreset.defaultModel;
   }
 
   return {
@@ -363,3 +330,28 @@ export function resolveLlmEndpointAndModel(input: ResolveLlmInput = {}): Resolve
     isCustomEndpoint,
   };
 }
+
+/** 各 Provider 对应的专属 API Key 环境变量名（未列出的 provider 无专属变量） */
+export const PROVIDER_ENV_KEYS: Readonly<Record<string, string>> = {
+  deepseek: "DEEPSEEK_API_KEY",
+  openai: "OPENAI_API_KEY",
+  zhipu: "ZHIPU_API_KEY",
+  dashscope: "DASHSCOPE_API_KEY",
+  siliconflow: "SILICONFLOW_API_KEY",
+  moonshot: "MOONSHOT_API_KEY",
+  volcengine: "VOLCENGINE_API_KEY",
+  minimax: "MINIMAX_API_KEY",
+  baidu: "QIANFAN_API_KEY",
+  tencent: "HUNYUAN_API_KEY",
+  lingyi: "YI_API_KEY",
+  stepfun: "STEPFUN_API_KEY",
+  baichuan: "BAICHUAN_API_KEY",
+  anthropic: "ANTHROPIC_API_KEY",
+  openrouter: "OPENROUTER_API_KEY",
+  groq: "GROQ_API_KEY",
+  "github-models": "GITHUB_TOKEN",
+  together: "TOGETHER_API_KEY",
+  fireworks: "FIREWORKS_API_KEY",
+  mistral: "MISTRAL_API_KEY",
+  perplexity: "PERPLEXITY_API_KEY",
+};

@@ -141,16 +141,16 @@ describe("detectProviderByModel 通过模型特征模式自动推断 Provider", 
 });
 
 describe("resolveLlmEndpointAndModel 综合自动补全与自定义优先级", () => {
-  it("场景 1: 用户仅指定 provider（如 zhipu），自动补全其 URL 与 Coding Plan 模型", () => {
-    const res = resolveLlmEndpointAndModel({ provider: "zhipu", enableCodingPlan: true });
+  it("场景 1: 用户仅指定 provider（如 zhipu），自动补全其 URL 与默认模型", () => {
+    const res = resolveLlmEndpointAndModel({ provider: "zhipu" });
     expect(res.endpoint).toBe("https://open.bigmodel.cn/api/paas/v4");
-    expect(res.model).toBe("codegeex-4");
+    expect(res.model).toBe("glm-4-flash");
     expect(res.provider).toBe("zhipu");
     expect(res.isCustomEndpoint).toBe(false);
   });
 
-  it("场景 2: 用户指定 provider 但关闭 coding plan，自动使用 defaultModel", () => {
-    const res = resolveLlmEndpointAndModel({ provider: "qwen", enableCodingPlan: false });
+  it("场景 2: 用户指定 provider（如 qwen 别名），自动归一化并使用默认模型", () => {
+    const res = resolveLlmEndpointAndModel({ provider: "qwen" });
     expect(res.endpoint).toBe("https://dashscope.aliyuncs.com/compatible-mode/v1");
     expect(res.model).toBe("qwen-plus");
     expect(res.provider).toBe("dashscope");

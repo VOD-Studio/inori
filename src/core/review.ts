@@ -64,7 +64,7 @@ export function parseReviews(
     if (!comment) continue;
     const severity = r.severity ?? "";
     let text = severity ? `**[${severity}]** ${comment}` : comment;
-    if (r.coding_plan && r.coding_plan.trim()) {
+    if (typeof r.coding_plan === "string" && r.coding_plan.trim()) {
       const heading = t(lang).codingPlanHeading;
       const planBlock = r.coding_plan
         .trim()
@@ -75,7 +75,7 @@ export function parseReviews(
     }
     const line = r.line;
     const path = r.path ?? "";
-    if (line && path && fileLines.has(path) && fileLines.get(path)!.has(line)) {
+    if (typeof line === "number" && line && path && fileLines.has(path) && fileLines.get(path)!.has(line)) {
       inlines.push({ path, line, body: text });
     } else {
       bodyItems.push(path ? `- ${text}（${path}）` : `- ${text}`);

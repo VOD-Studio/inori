@@ -30641,7 +30641,6 @@ function resolveConfig(inputs, fileConfig = {}) {
         provider: rawProvider,
         endpoint: rawEndpoint,
         model: rawModel,
-        enableCodingPlan: codingPlan,
     });
     // 3. language
     const language = enumField(inputs.language, ["zh", "en"], fileConfig.language, defaults_1.DEFAULTS.language);
@@ -30668,6 +30667,7 @@ function resolveConfig(inputs, fileConfig = {}) {
         providerName: llmResolved.providerName,
         llmEndpoint: llmResolved.endpoint,
         llmModel: llmResolved.model,
+        isCustomEndpoint: llmResolved.isCustomEndpoint,
         codingPlan,
         language,
         ignorePatterns,
@@ -31006,7 +31006,7 @@ function parseReviews(content, fileLines, lang = "zh") {
             continue;
         const severity = r.severity ?? "";
         let text = severity ? `**[${severity}]** ${comment}` : comment;
-        if (r.coding_plan && r.coding_plan.trim()) {
+        if (typeof r.coding_plan === "string" && r.coding_plan.trim()) {
             const heading = (0, i18n_1.t)(lang).codingPlanHeading;
             const planBlock = r.coding_plan
                 .trim()
@@ -31017,7 +31017,7 @@ function parseReviews(content, fileLines, lang = "zh") {
         }
         const line = r.line;
         const path = r.path ?? "";
-        if (line && path && fileLines.has(path) && fileLines.get(path).has(line)) {
+        if (typeof line === "number" && line && path && fileLines.has(path) && fileLines.get(path).has(line)) {
             inlines.push({ path, line, body: text });
         }
         else {
@@ -31548,7 +31548,8 @@ async function main() {
         return;
     }
     const providerLabel = config.providerName ? ` [${config.providerName}]` : "";
-    core.info(`评审 ${repo.owner}/${repo.repo} PR #${pr.number}，diff ${diff.length} 字符，模型 ${settings.model}${providerLabel}，端点 ${settings.endpoint}`);
+    const endpointLabel = config.isCustomEndpoint ? "（自定义）" : "（自动填充）";
+    core.info(`评审 ${repo.owner}/${repo.repo} PR #${pr.number}，diff ${diff.length} 字符，模型 ${settings.model}${providerLabel}，端点 ${settings.endpoint}${endpointLabel}`);
     const content = await (0, llm_1.callLlm)(diff, config, settings);
     const { summary, inlines, bodyItems } = (0, review_1.parseReviews)(content, fileLines, config.language);
     // 空结果也发布「未发现问题」并替换/更新旧评审，避免上一轮的意见残留误导
@@ -31607,6 +31608,7 @@ exports.callLlm = callLlm;
 const core = __importStar(__nccwpck_require__(6966));
 const prompt_1 = __nccwpck_require__(9080);
 const errors_1 = __nccwpck_require__(3113);
+const providers_1 = __nccwpck_require__(7220);
 /** 异步等待毫秒数，遵循 Promise.withResolvers 规范 */
 function delay(ms) {
     const { promise, resolve } = Promise.withResolvers();
@@ -31614,22 +31616,28 @@ function delay(ms) {
     return promise;
 }
 /**
- * 根据已解析配置（含自动推断与自定义）与环境密钥构造 LLM 调用设置
+ * 根据已解析配置（含自动推断与自定义）与环境密钥构造 LLM 调用设置。
+ * API Key 查找顺序：llm_api_key input > 推断 provider 的专属环境变量
+ * （如 ZHIPU_API_KEY）> 通用 LLM_API_KEY > 默认 provider（deepseek）专属变量。
+ * 不做跨 provider 乱序兜底，避免拿 A 家的 key 打 B 家端点。
  */
 function readLlmSettings(config) {
-    // 优先从 llm_api_key 读取，若为空可从常见环境变量兜底
     let apiKey = core.getInput("llm_api_key");
-    if (!apiKey) {
-        apiKey =
-            process.env.LLM_API_KEY ||
-                process.env.OPENAI_API_KEY ||
-                process.env.DEEPSEEK_API_KEY ||
-                process.env.ZHIPU_API_KEY ||
-                process.env.DASHSCOPE_API_KEY ||
-                "";
+    if (!apiKey && config.provider) {
+        apiKey = process.env[providers_1.PROVIDER_ENV_KEYS[config.provider]] ?? "";
     }
     if (!apiKey) {
-        throw new Error("缺少 LLM API Key：请在 Action with 中配置 llm_api_key 或设置 secrets/环境变量");
+        apiKey = process.env.LLM_API_KEY || "";
+    }
+    if (!apiKey) {
+        const defaultEnvKey = providers_1.PROVIDER_ENV_KEYS[providers_1.PROVIDER_PRESETS[0].id];
+        apiKey = defaultEnvKey ? process.env[defaultEnvKey] || "" : "";
+    }
+    if (!apiKey) {
+        const hint = config.provider
+            ? `（当前 provider: ${config.providerName ?? config.provider}，可设置 ${providers_1.PROVIDER_ENV_KEYS[config.provider] ?? "LLM_API_KEY"}）`
+            : "（可设置 LLM_API_KEY 或 DEEPSEEK_API_KEY）";
+        throw new Error(`缺少 LLM API Key：请在 Action with 中配置 llm_api_key 或设置环境变量${hint}`);
     }
     return {
         endpoint: config.llmEndpoint.replace(/\/+$/, ""),
@@ -31707,11 +31715,11 @@ async function callLlm(diff, config, settings) {
 "use strict";
 
 // ── 大模型提供商预设与自动推断引擎 ──
-// 内置主流全球与国内提供商预设、Coding Plan 专用端点与模型推荐，
+// 内置主流全球与国内提供商预设，
 // 支持通过 provider 名称、别名或模型名前缀自动补全 endpoint 与推荐模型，
 // 同时 100% 支持用户自定义 endpoint 与 model。
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.PROVIDER_PRESETS = void 0;
+exports.PROVIDER_ENV_KEYS = exports.PROVIDER_PRESETS = void 0;
 exports.findProvider = findProvider;
 exports.detectProviderByModel = detectProviderByModel;
 exports.resolveLlmEndpointAndModel = resolveLlmEndpointAndModel;
@@ -31722,7 +31730,6 @@ exports.PROVIDER_PRESETS = [
         name: "DeepSeek",
         defaultEndpoint: "https://api.deepseek.com/v1",
         defaultModel: "deepseek-chat",
-        codingPlanModel: "deepseek-chat",
         aliases: ["deepseek-ai", "deep-seek"],
         modelPatterns: [/^deepseek-(chat|reasoner|coder|v\d)/i, /^deepseek$/i],
     },
@@ -31732,7 +31739,6 @@ exports.PROVIDER_PRESETS = [
         name: "OpenAI",
         defaultEndpoint: "https://api.openai.com/v1",
         defaultModel: "gpt-4o-mini",
-        codingPlanModel: "gpt-4o",
         aliases: ["chatgpt"],
         modelPatterns: [/^(gpt-|o1|o3|chatgpt)/i],
     },
@@ -31742,7 +31748,6 @@ exports.PROVIDER_PRESETS = [
         name: "智谱 AI (GLM / CodeGeeX)",
         defaultEndpoint: "https://open.bigmodel.cn/api/paas/v4",
         defaultModel: "glm-4-flash",
-        codingPlanModel: "codegeex-4",
         aliases: ["bigmodel", "zhipuai", "glm", "codegeex"],
         modelPatterns: [/^(glm-|codegeex)/i],
     },
@@ -31752,7 +31757,6 @@ exports.PROVIDER_PRESETS = [
         name: "阿里云百炼 (通义千问 / Qwen)",
         defaultEndpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1",
         defaultModel: "qwen-plus",
-        codingPlanModel: "qwen-coder-plus",
         aliases: ["qwen", "aliyun", "tongyi", "alibaba", "bailian"],
         modelPatterns: [/^(qwen-|qwen2\.|qwen2\.5-|tongyi)/i],
     },
@@ -31762,7 +31766,6 @@ exports.PROVIDER_PRESETS = [
         name: "硅基流动 (SiliconFlow)",
         defaultEndpoint: "https://api.siliconflow.cn/v1",
         defaultModel: "deepseek-ai/DeepSeek-V3",
-        codingPlanModel: "Qwen/Qwen2.5-Coder-32B-Instruct",
         aliases: ["silicon", "silicon-flow"],
         modelPatterns: [/^deepseek-ai\//i, /^Qwen\/Qwen2\.5-Coder/i, /^internlm\//i, /^Pro\/deepseek/i],
     },
@@ -31772,7 +31775,6 @@ exports.PROVIDER_PRESETS = [
         name: "Moonshot AI (Kimi)",
         defaultEndpoint: "https://api.moonshot.cn/v1",
         defaultModel: "moonshot-v1-8k",
-        codingPlanModel: "moonshot-v1-32k",
         aliases: ["kimi", "moonshotai"],
         modelPatterns: [/^(moonshot|kimi)/i],
     },
@@ -31782,7 +31784,6 @@ exports.PROVIDER_PRESETS = [
         name: "字节跳动火山引擎 (豆包 / Doubao)",
         defaultEndpoint: "https://ark.cn-beijing.volces.com/api/v3",
         defaultModel: "doubao-pro-32k",
-        codingPlanModel: "doubao-coder-pro",
         aliases: ["doubao", "volces", "bytedance", "huoshan"],
         modelPatterns: [/^(doubao|ep-)/i],
     },
@@ -31792,7 +31793,6 @@ exports.PROVIDER_PRESETS = [
         name: "MiniMax (海螺 AI)",
         defaultEndpoint: "https://api.minimax.chat/v1",
         defaultModel: "MiniMax-Text-01",
-        codingPlanModel: "MiniMax-Text-01",
         aliases: ["hailuo", "abab"],
         modelPatterns: [/^(minimax|abab)/i],
     },
@@ -31802,7 +31802,6 @@ exports.PROVIDER_PRESETS = [
         name: "百度智能云千帆",
         defaultEndpoint: "https://qianfan.baidubce.com/v2",
         defaultModel: "ernie-4.0-turbo-8k",
-        codingPlanModel: "ernie-4.0-turbo-8k",
         aliases: ["qianfan", "ernie", "wenxin"],
         modelPatterns: [/^(ernie|eb-)/i],
     },
@@ -31812,7 +31811,6 @@ exports.PROVIDER_PRESETS = [
         name: "腾讯混元 (Tencent Hunyuan)",
         defaultEndpoint: "https://api.hunyuan.cloud.tencent.com/v1",
         defaultModel: "hunyuan-standard",
-        codingPlanModel: "hunyuan-code",
         aliases: ["hunyuan", "tencentcloud"],
         modelPatterns: [/^hunyuan/i],
     },
@@ -31822,7 +31820,6 @@ exports.PROVIDER_PRESETS = [
         name: "零一万物 (01.AI / Yi)",
         defaultEndpoint: "https://api.lingyiwanwu.com/v1",
         defaultModel: "yi-lightning",
-        codingPlanModel: "yi-lightning",
         aliases: ["01.ai", "yi", "lingyiwanwu"],
         modelPatterns: [/^yi-/i],
     },
@@ -31832,7 +31829,6 @@ exports.PROVIDER_PRESETS = [
         name: "阶跃星辰 (StepFun)",
         defaultEndpoint: "https://api.stepfun.com/v1",
         defaultModel: "step-1-8k",
-        codingPlanModel: "step-1-32k",
         aliases: ["step", "jieyue"],
         modelPatterns: [/^step-/i],
     },
@@ -31842,7 +31838,6 @@ exports.PROVIDER_PRESETS = [
         name: "百川智能 (Baichuan)",
         defaultEndpoint: "https://api.baichuan-ai.com/v1",
         defaultModel: "Baichuan4",
-        codingPlanModel: "Baichuan4",
         aliases: ["baichuan-ai"],
         modelPatterns: [/^baichuan/i],
     },
@@ -31852,7 +31847,6 @@ exports.PROVIDER_PRESETS = [
         name: "无问芯穹 (Infinigence AI)",
         defaultEndpoint: "https://cloud.infini-ai.com/maas/v1",
         defaultModel: "deepseek-v3",
-        codingPlanModel: "qwen2.5-coder-32b-instruct",
         aliases: ["infini", "genstudio"],
         modelPatterns: [],
     },
@@ -31862,7 +31856,6 @@ exports.PROVIDER_PRESETS = [
         name: "Anthropic (Claude)",
         defaultEndpoint: "https://api.anthropic.com/v1",
         defaultModel: "claude-3-5-sonnet-20241022",
-        codingPlanModel: "claude-3-7-sonnet-20250219",
         aliases: ["claude"],
         modelPatterns: [/^claude/i],
     },
@@ -31872,7 +31865,6 @@ exports.PROVIDER_PRESETS = [
         name: "OpenRouter",
         defaultEndpoint: "https://openrouter.ai/api/v1",
         defaultModel: "deepseek/deepseek-chat",
-        codingPlanModel: "anthropic/claude-3.5-sonnet",
         aliases: ["open-router"],
         modelPatterns: [/^openrouter\//i],
     },
@@ -31882,7 +31874,6 @@ exports.PROVIDER_PRESETS = [
         name: "Groq",
         defaultEndpoint: "https://api.groq.com/openai/v1",
         defaultModel: "llama-3.3-70b-versatile",
-        codingPlanModel: "llama-3.3-70b-versatile",
         aliases: [],
         modelPatterns: [/^(llama-|mixtral-|gemma-)/i],
     },
@@ -31892,7 +31883,6 @@ exports.PROVIDER_PRESETS = [
         name: "GitHub Models",
         defaultEndpoint: "https://models.inference.ai.azure.com",
         defaultModel: "gpt-4o-mini",
-        codingPlanModel: "gpt-4o",
         aliases: ["github", "azure-models", "gh-models"],
         modelPatterns: [],
     },
@@ -31902,7 +31892,6 @@ exports.PROVIDER_PRESETS = [
         name: "Together AI",
         defaultEndpoint: "https://api.together.xyz/v1",
         defaultModel: "deepseek-ai/DeepSeek-V3",
-        codingPlanModel: "Qwen/Qwen2.5-Coder-32B-Instruct",
         aliases: ["together-ai", "togetherai"],
         modelPatterns: [/^meta-llama\//i, /^togethercomputer\//i],
     },
@@ -31912,7 +31901,6 @@ exports.PROVIDER_PRESETS = [
         name: "Fireworks AI",
         defaultEndpoint: "https://api.fireworks.ai/inference/v1",
         defaultModel: "accounts/fireworks/models/deepseek-v3",
-        codingPlanModel: "accounts/fireworks/models/deepseek-v3",
         aliases: ["fireworks-ai"],
         modelPatterns: [/^accounts\/fireworks\//i],
     },
@@ -31922,7 +31910,6 @@ exports.PROVIDER_PRESETS = [
         name: "Mistral AI",
         defaultEndpoint: "https://api.mistral.ai/v1",
         defaultModel: "codestral-latest",
-        codingPlanModel: "codestral-latest",
         aliases: ["mistralai", "codestral"],
         modelPatterns: [/^(mistral|codestral|pixtral)/i],
     },
@@ -31932,7 +31919,6 @@ exports.PROVIDER_PRESETS = [
         name: "Perplexity",
         defaultEndpoint: "https://api.perplexity.ai",
         defaultModel: "sonar",
-        codingPlanModel: "sonar-pro",
         aliases: ["pplx"],
         modelPatterns: [/^sonar/i],
     },
@@ -31942,7 +31928,6 @@ exports.PROVIDER_PRESETS = [
         name: "Ollama (Local / Self-hosted)",
         defaultEndpoint: "http://localhost:11434/v1",
         defaultModel: "llama3",
-        codingPlanModel: "qwen2.5-coder",
         aliases: ["local-ollama"],
         modelPatterns: [/^ollama\//i],
     },
@@ -31952,7 +31937,6 @@ exports.PROVIDER_PRESETS = [
         name: "Local OpenAI-Compatible Server (vLLM / LMStudio)",
         defaultEndpoint: "http://localhost:8000/v1",
         defaultModel: "default",
-        codingPlanModel: "default",
         aliases: ["vllm", "lmstudio", "custom-local"],
         modelPatterns: [],
     },
@@ -31987,7 +31971,7 @@ function detectProviderByModel(modelName) {
 /**
  * 解析并自动补全 LLM Endpoint 与 Model 配置：
  * 1. 显式 endpoint 优先级最高（支持完全自定义）；
- * 2. 若指定 provider，自动使用其默认 endpoint 与模型（Coding Plan 模式下优先取 codingPlanModel）；
+ * 2. 若指定 provider，自动使用其默认 endpoint 与模型；
  * 3. 若未指定 provider 但指定了 model，通过模型特征自动推断所属 provider 及对应 endpoint；
  * 4. 若均未指定，默认回退到 DeepSeek 官方预设。
  */
@@ -31995,7 +31979,6 @@ function resolveLlmEndpointAndModel(input = {}) {
     const explicitEndpoint = input.endpoint ? input.endpoint.trim().replace(/\/+$/, "") : "";
     const explicitModel = input.model ? input.model.trim() : "";
     const explicitProvider = input.provider ? input.provider.trim() : "";
-    const useCoding = input.enableCodingPlan ?? true;
     // 1. 显式通过 provider 查找
     let matchedPreset = findProvider(explicitProvider);
     // 2. 若无 provider 但有 model，尝试通过 modelName 推断 provider
@@ -32011,12 +31994,7 @@ function resolveLlmEndpointAndModel(input = {}) {
     // 确定 model
     let model = explicitModel;
     if (!model) {
-        if (useCoding && effectivePreset.codingPlanModel) {
-            model = effectivePreset.codingPlanModel;
-        }
-        else {
-            model = effectivePreset.defaultModel;
-        }
+        model = effectivePreset.defaultModel;
     }
     return {
         endpoint,
@@ -32026,6 +32004,30 @@ function resolveLlmEndpointAndModel(input = {}) {
         isCustomEndpoint,
     };
 }
+/** 各 Provider 对应的专属 API Key 环境变量名（未列出的 provider 无专属变量） */
+exports.PROVIDER_ENV_KEYS = {
+    deepseek: "DEEPSEEK_API_KEY",
+    openai: "OPENAI_API_KEY",
+    zhipu: "ZHIPU_API_KEY",
+    dashscope: "DASHSCOPE_API_KEY",
+    siliconflow: "SILICONFLOW_API_KEY",
+    moonshot: "MOONSHOT_API_KEY",
+    volcengine: "VOLCENGINE_API_KEY",
+    minimax: "MINIMAX_API_KEY",
+    baidu: "QIANFAN_API_KEY",
+    tencent: "HUNYUAN_API_KEY",
+    lingyi: "YI_API_KEY",
+    stepfun: "STEPFUN_API_KEY",
+    baichuan: "BAICHUAN_API_KEY",
+    anthropic: "ANTHROPIC_API_KEY",
+    openrouter: "OPENROUTER_API_KEY",
+    groq: "GROQ_API_KEY",
+    "github-models": "GITHUB_TOKEN",
+    together: "TOGETHER_API_KEY",
+    fireworks: "FIREWORKS_API_KEY",
+    mistral: "MISTRAL_API_KEY",
+    perplexity: "PERPLEXITY_API_KEY",
+};
 
 
 /***/ }),

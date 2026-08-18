@@ -101,7 +101,6 @@ export function resolveConfig(inputs: ActionInputs, fileConfig: InoriConfig = {}
     provider: rawProvider,
     endpoint: rawEndpoint,
     model: rawModel,
-    enableCodingPlan: codingPlan,
   });
 
   // 3. language
@@ -159,6 +158,7 @@ export function resolveConfig(inputs: ActionInputs, fileConfig: InoriConfig = {}
     providerName: llmResolved.providerName,
     llmEndpoint: llmResolved.endpoint,
     llmModel: llmResolved.model,
+    isCustomEndpoint: llmResolved.isCustomEndpoint,
     codingPlan,
     language,
     ignorePatterns,

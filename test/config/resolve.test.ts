@@ -92,6 +92,7 @@ describe("resolveConfig 优先级：Action Inputs > 配置文件 > 内置默认�
       providerName: undefined,
       llmEndpoint: DEFAULTS.llmEndpoint,
       llmModel: DEFAULTS.llmModel,
+      isCustomEndpoint: false,
       codingPlan: DEFAULTS.codingPlan,
       language: DEFAULTS.language,
       ignorePatterns: expect.any(Array),
@@ -108,12 +109,13 @@ describe("resolveConfig 优先级：Action Inputs > 配置文件 > 内置默认�
     expect(resolved.ignorePatterns).toContain("*.min.js");
   });
 
-  it("配置文件指定 provider（如 zhipu）自动推断 endpoint 与 Coding Plan 模型", () => {
+  it("配置文件指定 provider（如 zhipu）自动推断 endpoint 与默认模型", () => {
     const resolved = resolveConfig(inputs(), { provider: "zhipu" });
     expect(resolved.provider).toBe("zhipu");
     expect(resolved.llmEndpoint).toBe("https://open.bigmodel.cn/api/paas/v4");
-    expect(resolved.llmModel).toBe("codegeex-4");
+    expect(resolved.llmModel).toBe("glm-4-flash");
     expect(resolved.codingPlan).toBe(true);
+    expect(resolved.isCustomEndpoint).toBe(false);
   });
 
   it("Action Input 指定 provider 优先于配置文件", () => {
@@ -123,7 +125,7 @@ describe("resolveConfig 优先级：Action Inputs > 配置文件 > 内置默认�
     );
     expect(resolved.provider).toBe("dashscope");
     expect(resolved.llmEndpoint).toBe("https://dashscope.aliyuncs.com/compatible-mode/v1");
-    expect(resolved.llmModel).toBe("qwen-coder-plus");
+    expect(resolved.llmModel).toBe("qwen-plus");
   });
 
   it("显式自定义 endpoint 优先级高于自动推断", () => {
