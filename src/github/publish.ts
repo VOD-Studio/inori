@@ -1,9 +1,9 @@
-import * as core from "@actions/core";
-import { errMsg } from "../core/errors";
-import { REVIEW_MARKER, type InlineComment } from "../core/review";
-import type { OnUpdate } from "../config";
-import { deleteOldInlineComments, findOldReviewId, resolveOldInlineThreads } from "./history";
-import type { OctokitInstance, RepoContext } from "./paginate";
+import * as core from '@actions/core'
+import type { OnUpdate } from '../config'
+import { errMsg } from '../core/errors'
+import { type InlineComment, REVIEW_MARKER } from '../core/review'
+import { deleteOldInlineComments, findOldReviewId, resolveOldInlineThreads } from './history'
+import type { OctokitInstance, RepoContext } from './paginate'
 
 // ── 评审发布 ──
 
@@ -20,45 +20,45 @@ export async function postReview(
   headSha: string,
   body: string,
   inlines: InlineComment[],
-  onUpdate: OnUpdate
+  onUpdate: OnUpdate,
 ): Promise<void> {
-  if (onUpdate === "replace") {
+  if (onUpdate === 'replace') {
     try {
-      await deleteOldInlineComments(octokit, repo, prNumber);
+      await deleteOldInlineComments(octokit, repo, prNumber)
     } catch (e) {
-      core.warning(`清理旧 inline 评论失败，继续发布：${errMsg(e)}`);
+      core.warning(`清理旧 inline 评论失败，继续发布：${errMsg(e)}`)
     }
-  } else if (onUpdate === "resolve") {
+  } else if (onUpdate === 'resolve') {
     try {
-      await resolveOldInlineThreads(octokit, repo, prNumber);
+      await resolveOldInlineThreads(octokit, repo, prNumber)
     } catch (e) {
-      core.warning(`解决旧 inline 评审线程失败，继续发布：${errMsg(e)}`);
+      core.warning(`解决旧 inline 评审线程失败，继续发布：${errMsg(e)}`)
     }
   }
 
-  let posted = false;
+  let posted = false
   try {
-    const oldId = await findOldReviewId(octokit, repo, prNumber);
+    const oldId = await findOldReviewId(octokit, repo, prNumber)
     if (oldId !== null) {
       await octokit.rest.pulls.updateReview({
         ...repo,
         pull_number: prNumber,
         review_id: oldId,
         body,
-      });
-      posted = true;
+      })
+      posted = true
     }
   } catch (e) {
-    core.warning(`更新旧评审失败，改为新建：${errMsg(e)}`);
+    core.warning(`更新旧评审失败，改为新建：${errMsg(e)}`)
   }
   if (!posted) {
     await octokit.rest.pulls.createReview({
       ...repo,
       pull_number: prNumber,
       body,
-      event: "COMMENT",
+      event: 'COMMENT',
       commit_id: headSha,
-    });
+    })
   }
 
   // inline 逐条发布，单条失败只跳过该条；汇总 body 已覆盖整体结论
@@ -71,10 +71,10 @@ export async function postReview(
         path: ic.path,
         line: ic.line,
         commit_id: headSha,
-      });
-      core.info(`inline 评论: ${ic.path}:${ic.line}`);
+      })
+      core.info(`inline 评论: ${ic.path}:${ic.line}`)
     } catch (e) {
-      core.warning(`inline 评论失败，跳过该条：${errMsg(e)}`);
+      core.warning(`inline 评论失败，跳过该条：${errMsg(e)}`)
     }
   }
 }

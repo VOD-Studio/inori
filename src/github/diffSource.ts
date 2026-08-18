@@ -1,14 +1,14 @@
-import * as core from "@actions/core";
-import { addedLines, formatDiffAndTruncate, isIgnored, type PrFile } from "../core/diff";
-import type { ResolvedConfig } from "../config";
-import { paginate, type OctokitInstance, type RepoContext } from "./paginate";
+import * as core from '@actions/core'
+import type { ResolvedConfig } from '../config'
+import { addedLines, formatDiffAndTruncate, isIgnored, type PrFile } from '../core/diff'
+import { type OctokitInstance, paginate, type RepoContext } from './paginate'
 
 // ── PR diff 拉取（过滤 + 安全截断 + 行号映射）──
 
 export interface PrDiff {
-  diff: string;
+  diff: string
   /** 各保留文件的新增行号集合（inline 锚点校验依据） */
-  fileLines: Map<string, Set<number>>;
+  fileLines: Map<string, Set<number>>
 }
 
 /**
@@ -19,36 +19,36 @@ export async function getPrDiff(
   octokit: OctokitInstance,
   repo: RepoContext,
   prNumber: number,
-  config: ResolvedConfig
+  config: ResolvedConfig,
 ): Promise<PrDiff> {
   const files = await paginate<PrFile>((page) =>
     octokit.rest.pulls
       .listFiles({ ...repo, pull_number: prNumber, per_page: 100, page })
-      .then((r) => r.data as PrFile[])
-  );
+      .then((r) => r.data as PrFile[]),
+  )
 
-  const validFiles: { filename: string; patch: string }[] = [];
+  const validFiles: { filename: string; patch: string }[] = []
   for (const f of files) {
     if (isIgnored(f.filename, config.ignorePatterns)) {
-      core.info(`忽略 ${f.filename}`);
-      continue;
+      core.info(`忽略 ${f.filename}`)
+      continue
     }
-    if (!f.patch) continue;
-    validFiles.push({ filename: f.filename, patch: f.patch });
+    if (!f.patch) continue
+    validFiles.push({ filename: f.filename, patch: f.patch })
   }
 
-  const result = formatDiffAndTruncate(validFiles, config.maxDiffChars, config.language);
+  const result = formatDiffAndTruncate(validFiles, config.maxDiffChars, config.language)
   if (result.truncated) {
     core.info(
-      `diff 过大，已按文件块安全截断到 ${config.maxDiffChars} 字符以内（略去后续 ${result.omittedCount} 个文件）`
-    );
+      `diff 过大，已按文件块安全截断到 ${config.maxDiffChars} 字符以内（略去后续 ${result.omittedCount} 个文件）`,
+    )
   }
 
   // 仅对保留在 diff 中的文件建立行号映射
-  const includedSet = new Set(result.includedFiles);
-  const fileLines = new Map<string, Set<number>>();
+  const includedSet = new Set(result.includedFiles)
+  const fileLines = new Map<string, Set<number>>()
   for (const f of validFiles) {
-    if (includedSet.has(f.filename)) fileLines.set(f.filename, addedLines(f.patch));
+    if (includedSet.has(f.filename)) fileLines.set(f.filename, addedLines(f.patch))
   }
-  return { diff: result.diff, fileLines };
+  return { diff: result.diff, fileLines }
 }
