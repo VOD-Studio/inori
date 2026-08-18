@@ -10,7 +10,7 @@ Inori 会分析 PR 的代码变更（diff），并将评审意见以**精准锚�
 
 ## 为什么选择 Inori
 
-- **模型配置自动识别（内置 24+ 主流提供商预设）**：无需手动查询并复制繁琐易错的 API Endpoint！直接传入 `provider: zhipu` / `qwen` / `openai` / `deepseek` / `siliconflow` / `kimi` / `anthropic`，或者仅传入 `llm_model: glm-4-flash` / `gpt-4o`，Inori 即可自动补全对应端点与推荐编程模型。同时 100% 允许自定义 `llm_endpoint`。
+- **模型配置自动识别（精选 22 个主流提供商预设）**：无需手动查询并复制繁琐易错的 API Endpoint！直接传入 `provider: deepseek` / `qwen` / `glm` / `kimi` / `openai` / `google` / `xai`，或者仅传入 `llm_model: glm-4.7-flash` / `gpt-4o`，Inori 即可自动补全对应端点与推荐模型。同时 100% 允许自定义 `llm_endpoint`。
 - **落地可执行的修复计划（Coding Plan）**：审查发现问题时，自动生成结构化、步骤清晰的修复计划与代码重构建议，在 PR 中优雅高亮展示，开发者可直接参考采纳。
 - **精准锚定真实变更行**：每条 Inline 评论在发布前都会比对 PR 实际 diff 中的新增行（`+` 行），行号不合法的意见自动降级放入总结报告，杜绝悬空评论。
 - **收口纪律与防发散机制**：内置严格的评审纪律（够格标准、明确排除防御性穷举与教程化建议、逐字核对引文、客观校准严重度），彻底解决多轮 Re-review 模型陷入低价值挑刺和防御性穷举的问题。
@@ -45,6 +45,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: VOD-Studio/inori@v0.1.0
         with:
           provider: deepseek             # 自动识别端点与模型；也可传 `llm_model: gpt-4o` 等
           llm_api_key: ${{ secrets.DEEPSEEK_API_KEY }}
@@ -53,7 +54,7 @@ jobs:
 3. 提交 PR，Inori 将会自动执行代码审查并发表意见。
 
 > **切换大模型服务商极简** —— 无需手动查填 URL：
-> - **DeepSeek**：`provider: deepseek`（或 `llm_model: deepseek-chat`）
+> - **DeepSeek**：`provider: deepseek`（或 `llm_model: deepseek-v4-flash`）
 > - **GLM**：`provider: zhipu`（或 `llm_model: glm-4.7-flash`）
 > - **Qwen**：`provider: qwen`（或 `llm_model: qwen-plus`, `qwen3-coder-plus`）
 > - **SiliconFlow**：`provider: siliconflow`
@@ -108,7 +109,7 @@ Inori 默认自动忽略以下常见非评审文件（无需在 `ignore_patterns
 | 参数 | 说明 | 必填 | 默认值 |
 |---|---|:---:|---|
 | `provider` | 模型提供商预设（`deepseek`, `zhipu`, `qwen`, `siliconflow`, `openai`, `kimi`, `anthropic`, `groq` 等），自动补全端点与模型 | — | `deepseek` |
-| `llm_model` | 模型名称（可选，不传则按 provider 预设或模型名特征自动推断，如 `gpt-4o`, `glm-4-flash`） | — | 自动推断 |
+| `llm_model` | 模型名称（可选，不传则按 provider 预设或模型名特征自动推断，如 `gpt-4o`, `glm-4.7-flash`） | — | 自动推断 |
 | `llm_endpoint` | 自定义 OpenAI 兼容接口 Base URL（可选，不传则自动推断） | — | 自动推断 |
 | `llm_api_key` | 大模型 API 密钥 | ✅ | — |
 | `coding_plan` | 是否在评审中生成具体的代码修复计划 (Coding Plan) 与实施步骤 | — | `true` |

@@ -15,7 +15,7 @@ inputs:
     required: false
     default: ''
   llm_model:
-    description: 'Model name (optional, auto-inferred from provider preset, e.g. deepseek-chat, gpt-4o, glm-4-flash, qwen-plus)'
+    description: 'Model name (optional, auto-inferred from provider preset, e.g. deepseek-v4-flash, gpt-4o, glm-4.7-flash, qwen-plus)'
     required: false
     default: ''
   llm_api_key:

@@ -10,7 +10,7 @@ Inori reviews your PR diff and posts findings as **inline comments anchored to r
 
 ## Why Inori
 
-- **Auto-detection & 24+ Provider Presets.** No need to look up or copy API endpoints. Simply specify `provider: zhipu` / `qwen` / `openai` / `deepseek` / `siliconflow` / `kimi` / `anthropic`, or just specify `llm_model: glm-4-flash` / `gpt-4o`, and Inori auto-detects the matching endpoint and coding model. Full custom `llm_endpoint` is always supported.
+- **22 Curated Provider Presets.** No need to look up or copy API endpoints. Simply specify `provider: deepseek` / `qwen` / `glm` / `kimi` / `openai` / `google` / `xai`, or just specify `llm_model: glm-4.7-flash` / `gpt-4o`, and Inori auto-detects the matching endpoint and model. Full custom `llm_endpoint` is always supported.
 - **Actionable Coding Plan.** Generates clear, step-by-step fix recommendations and code replacement snippets whenever a defect is found, rendered cleanly in PR comments.
 - **Inline comments on real lines.** Every comment's line number is validated against the actual diff before posting; comments that don't land on a real added line fall back to the summary instead of dangling.
 - **Review discipline & convergence.** Built-in strict review constraints prevent LLMs from degenerating into "defensive exhaustion" during multi-round re-reviews — focuses on real defects, bans unprompted defensive boilerplate suggestions, mandates verbatim quoting, and calibrates severities objectively.
@@ -53,7 +53,7 @@ jobs:
 3. Open a PR. Inori reviews it automatically.
 
 > **Switching providers is effortless** — no endpoint URL lookup needed:
-> - **DeepSeek**: `provider: deepseek` (or `llm_model: deepseek-chat`)
+> - **DeepSeek**: `provider: deepseek` (or `llm_model: deepseek-v4-flash`)
 > - **GLM**: `provider: zhipu` (or `llm_model: glm-4.7-flash`)
 > - **Qwen**: `provider: qwen` (or `llm_model: qwen-plus`, `qwen3-coder-plus`)
 > - **SiliconFlow**: `provider: siliconflow`
@@ -108,7 +108,7 @@ Inori automatically ignores common non-reviewable files by default (no need to r
 | Input | Description | Required | Default |
 |-------|-------------|:--------:|---------|
 | `provider` | Provider preset name (`deepseek`, `zhipu`, `qwen`, `siliconflow`, `openai`, `kimi`, `anthropic`, `groq`, etc.). Auto-fills endpoint & model. | — | `deepseek` |
-| `llm_model` | Model name (optional, auto-inferred from provider preset or model name pattern, e.g. `gpt-4o`, `glm-4-flash`) | — | Auto-inferred |
+| `llm_model` | Model name (optional, auto-inferred from provider preset or model name pattern, e.g. `gpt-4o`, `glm-4.7-flash`) | — | Auto-inferred |
 | `llm_endpoint` | Custom OpenAI-compatible API base URL (optional, auto-inferred when omitted) | — | Auto-inferred |
 | `llm_api_key` | API key for the LLM provider | ✅ | — |
 | `coding_plan` | Whether to generate actionable fix steps and code suggestions for issues | — | `true` |
