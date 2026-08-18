@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.3](https://github.com/VOD-Studio/inori/compare/v0.2.2...v0.2.3) (2026-08-18)
+
+
+### 新增
+
+* paths_ignore 整体跳过纯 CI/文档类变更的评审 ([#15](https://github.com/VOD-Studio/inori/issues/15)) ([0a723c9](https://github.com/VOD-Studio/inori/commit/0a723c949096bc9561722f1fe326119ce6e3d946))
+
 ## [0.2.2](https://github.com/VOD-Studio/inori/compare/v0.2.1...v0.2.2) (2026-08-18)
 
 
