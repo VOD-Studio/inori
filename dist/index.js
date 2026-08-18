@@ -43222,8 +43222,13 @@ function formatDiffAndTruncate(files, maxDiffChars, lang = "zh") {
 //     github-models/openai/anthropic/groq/openrouter/mistral/perplexity/zhipu
 //   端点探测通过（401/400/405 = 路径存在）：全部 24 家
 //   defaultModel 未验证（保留快照，标注）：siliconflow/baidu/tencent/lingyi/
-//     stepfun/baichuan/infinigence/together/minimax(M2 世代由 Groq/Fireworks
-//     托管记录佐证，自家平台文档为 SPA 未能程序化核验)
+//     stepfun/baichuan/infinigence/together（端点探测通过，模型名保留快照）
+//
+// 订阅套餐（Coding Plan / Token Plan）体系（2026-08-18 官方文档核验）：
+//   qwen-coding（阿里 sk-sp-）/ glm-coding（智谱）/ doubao-coding（火山）/
+//   minimax-token（MiniMax sk-cp-）——key 与端点均与按量计费不互通。
+//   DeepSeek 与 Kimi（Moonshot）官方无订阅套餐，纯按量计费；
+//   kimi-k2.5 等模型是阿里/火山套餐白名单里的聚合第三方模型。
 const PROVIDER_PRESETS = [
     // ── 1. DeepSeek ──
     {
@@ -43312,14 +43317,37 @@ const PROVIDER_PRESETS = [
         aliases: ["doubao", "volces", "bytedance", "huoshan"],
         modelPatterns: [/^(doubao|ep-)/i],
     },
+    // ── 7a. Doubao Coding Plan（火山方舟编程套餐，id: doubao-coding）──
+    // 套餐端点与按量 /api/v3 不互通；套餐 key 无特殊前缀（控制台专属密钥）。
+    // 默认模型 ark-code-latest：官方支持的 Auto 调度别名，不依赖版本号快照。
+    // 官方 ToS 限指定编程工具使用，CI 场景请自行评估合规风险。
+    {
+        id: "doubao-coding",
+        name: "Doubao Coding Plan",
+        defaultEndpoint: "https://ark.cn-beijing.volces.com/api/coding/v3",
+        defaultModel: "ark-code-latest",
+        aliases: ["volcengine-coding", "doubao-coding-plan", "ark-coding"],
+        modelPatterns: [],
+    },
     // ── 8. MiniMax（id: minimax）──
     {
         id: "minimax",
         name: "MiniMax",
-        defaultEndpoint: "https://api.minimax.chat/v1",
+        defaultEndpoint: "https://api.minimaxi.com/v1",
         defaultModel: "MiniMax-M2",
         aliases: ["hailuo", "abab"],
         modelPatterns: [/^(minimax|abab)/i],
+    },
+    // ── 8a. MiniMax Token Plan（订阅套餐，id: minimax-token）──
+    // 订阅 key（sk-cp-）与按量 key 不互通（官方明示）；全模态共享额度。
+    // 官方 ToS 限指定编程工具使用，CI 场景请自行评估合规风险。
+    {
+        id: "minimax-token",
+        name: "MiniMax Token Plan",
+        defaultEndpoint: "https://api.minimaxi.com/v1",
+        defaultModel: "MiniMax-M2.7",
+        aliases: ["minimax-coding", "minimax-plan", "token-plan"],
+        modelPatterns: [],
     },
     // ── 9. ERNIE（百度千帆，id: baidu）──
     {
@@ -43999,19 +44027,25 @@ function delay(ms) {
     return promise;
 }
 /**
- * 阿里百炼 Coding Plan 防呆：套餐 key（sk-sp-）与按量计费 key（sk-）
- * 的端点不互通（官方文档明示）。混用时前者报 invalid_api_key、
- * 后者不抵扣套餐直接按量扣费——都是用户花冤枉钱的坑，提前警告。
+ * 订阅套餐 key 防呆：各平台套餐 key 与按量计费 key/端点不互通（官方文档明示）。
+ * 混用结局：报 invalid_api_key，或不抵扣订阅额度直接按量扣费——都是花冤枉钱。
+ * - 阿里百炼：套餐 key 前缀 sk-sp-，套餐端点 coding.dashscope.aliyuncs.com
+ * - MiniMax：订阅 key 前缀 sk-cp-，与按量共用端点 api.minimaxi.com（仅 key 区分）
  */
 function warnCodingPlanMismatch(config, apiKey) {
-    const codingEndpoint = config.llmEndpoint.includes("coding.dashscope.aliyuncs.com");
-    const payAsYouGo = config.llmEndpoint.includes("dashscope.aliyuncs.com") && !codingEndpoint;
-    const codingKey = apiKey.startsWith("sk-sp-");
-    if (codingKey && payAsYouGo) {
-        core.warning("检测到 Coding Plan API Key（sk-sp-）但端点是按量计费端点（dashscope.aliyuncs.com）。两者不互通：该调用将返回 invalid_api_key。如需套餐抵扣请改用 provider: qwen-coding（https://coding.dashscope.aliyuncs.com/v1）");
+    // 阿里：key 前缀与端点双判别
+    const aliCodingEndpoint = config.llmEndpoint.includes("coding.dashscope.aliyuncs.com");
+    const aliPayAsYouGo = config.llmEndpoint.includes("dashscope.aliyuncs.com") && !aliCodingEndpoint;
+    const aliCodingKey = apiKey.startsWith("sk-sp-");
+    if (aliCodingKey && aliPayAsYouGo) {
+        core.warning("检测到阿里 Coding Plan API Key（sk-sp-）但端点是按量计费端点（dashscope.aliyuncs.com）。两者不互通：该调用将返回 invalid_api_key。如需套餐抵扣请改用 provider: qwen-coding（https://coding.dashscope.aliyuncs.com/v1）");
     }
-    else if (!codingKey && codingEndpoint) {
-        core.warning("端点是 Coding Plan 套餐端点（coding.dashscope.aliyuncs.com）但 key 不是套餐格式（sk-sp-）。两者不互通：通用 key 调用套餐端点将返回 invalid_api_key，且该调用不会抵扣套餐额度");
+    else if (!aliCodingKey && aliCodingEndpoint) {
+        core.warning("端点是阿里 Coding Plan 套餐端点（coding.dashscope.aliyuncs.com）但 key 不是套餐格式（sk-sp-）。两者不互通：通用 key 调用套餐端点将返回 invalid_api_key，且不会抵扣套餐额度");
+    }
+    // MiniMax：套餐与按量共用端点，只能靠 key 前缀判别
+    if (apiKey.startsWith("sk-cp-") && !config.llmEndpoint.includes("minimaxi.com")) {
+        core.warning("检测到 MiniMax Token Plan 订阅 Key（sk-cp-）但端点不是 api.minimaxi.com。订阅 Key 与其他平台/按量计费体系不互通，该调用将失败。MiniMax（含订阅）请使用 provider: minimax 或 minimax-token（https://api.minimaxi.com/v1）");
     }
 }
 /**

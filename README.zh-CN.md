@@ -62,10 +62,13 @@ jobs:
 > - **Claude**：`provider: anthropic`（或 `llm_model: claude-sonnet-4`）
 > - **Doubao / ERNIE / Hunyuan / Yi / Groq / OpenRouter / Mistral / Ollama / MiniMax ...**（内置 24+ 主流预设）
 >
-> **Coding Plan 套餐**（固定月费额度）使用**独立的端点与 key 体系**，与按量计费凭据**不互通**：
+> **订阅套餐**（固定月费额度）使用**独立的端点与 key 体系**，与按量计费凭据**不互通**：
 > - `provider: qwen-coding` → `https://coding.dashscope.aliyuncs.com/v1`，需 `sk-sp-` 套餐 key（模型：`qwen3-coder-plus`、`kimi-k2.5`、`glm-5`、`MiniMax-M2.5` 等）
-> - `provider: glm-coding` → `https://open.bigmodel.cn/api/coding/paas/v4`
-> ⚠️ 注意：各平台 ToS 限制 Coding Plan key 仅用于指定编程工具、禁止自动化 API 调用。在 CI 评审中使用可能违反条款、有封 key 风险，请自行评估。
+> - `provider: glm-coding` → `https://open.bigmodel.cn/api/coding/paas/v4`（模型：`glm-5.3`）
+> - `provider: doubao-coding` → `https://ark.cn-beijing.volces.com/api/coding/v3`（模型：`ark-code-latest`，白名单含豆包/GLM/Kimi）
+> - `provider: minimax-token` → `https://api.minimaxi.com/v1`，需 `sk-cp-` 订阅 key（模型：`MiniMax-M2.7`；与按量计费共用端点，仅 key 不同）
+> DeepSeek 与 Kimi（Moonshot）官方无订阅套餐（纯按量计费）；`kimi-k2.5` 等是阿里/火山套餐白名单里聚合的第三方模型。
+> ⚠️ 注意：各平台 ToS 限制套餐 key 仅用于指定编程工具、禁止自动化 API 调用。在 CI 评审中使用可能违反条款、有封 key 风险，请自行评估。
 > - **自建代理 / 本地部署**：显式指定 `llm_endpoint: https://your-gateway/v1` 始终享有最高优先级。
 
 ## 仓库配置（`.github/inori.yml`）

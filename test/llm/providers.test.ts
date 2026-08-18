@@ -17,6 +17,8 @@ describe("PROVIDER_PRESETS 预设完整性与合法性", () => {
     expect(ids).toContain("dashscope");
     expect(ids).toContain("qwen-coding");
     expect(ids).toContain("glm-coding");
+    expect(ids).toContain("doubao-coding");
+    expect(ids).toContain("minimax-token");
     expect(ids).toContain("siliconflow");
     expect(ids).toContain("moonshot");
     expect(ids).toContain("volcengine");
@@ -167,9 +169,25 @@ describe("resolveLlmEndpointAndModel 综合自动补全与自定义优先级", (
     expect(res.provider).toBe("glm-coding");
   });
 
+  it("Coding Plan 预设：doubao-coding 套餐端点（独立于按量计费 /api/v3）", () => {
+    const res = resolveLlmEndpointAndModel({ provider: "doubao-coding" });
+    expect(res.endpoint).toBe("https://ark.cn-beijing.volces.com/api/coding/v3");
+    expect(res.model).toBe("ark-code-latest");
+    expect(res.provider).toBe("doubao-coding");
+  });
+
+  it("Token Plan 预设：minimax-token 与按量共用端点、模型 M2.7", () => {
+    const res = resolveLlmEndpointAndModel({ provider: "minimax-token" });
+    expect(res.endpoint).toBe("https://api.minimaxi.com/v1");
+    expect(res.model).toBe("MiniMax-M2.7");
+    expect(res.provider).toBe("minimax-token");
+  });
+
   it("Coding Plan 别名归一化", () => {
     expect(findProvider("dashscope-coding")?.id).toBe("qwen-coding");
     expect(findProvider("zhipu-coding")?.id).toBe("glm-coding");
+    expect(findProvider("volcengine-coding")?.id).toBe("doubao-coding");
+    expect(findProvider("minimax-coding")?.id).toBe("minimax-token");
   });
 
   it("Coding Plan 模型名不做推断（modelPatterns 为空，避免与按量体系抢匹配）", () => {

@@ -62,10 +62,13 @@ jobs:
 > - **Claude**: `provider: anthropic` (or `llm_model: claude-sonnet-4`)
 > - **Doubao / ERNIE / Hunyuan / Yi / Groq / OpenRouter / Mistral / Ollama / MiniMax ...** (All 24+ built-in presets!)
 >
-> **Coding Plan subscriptions** (fixed monthly quota) use a **separate endpoint & key system** — they are NOT interchangeable with pay-as-you-go credentials:
+> **Subscription plans** (fixed monthly quota) use a **separate endpoint & key system** — NOT interchangeable with pay-as-you-go credentials:
 > - `provider: qwen-coding` → `https://coding.dashscope.aliyuncs.com/v1` with a `sk-sp-` key (models: `qwen3-coder-plus`, `kimi-k2.5`, `glm-5`, `MiniMax-M2.5`, ...)
-> - `provider: glm-coding` → `https://open.bigmodel.cn/api/coding/paas/v4`
-> ⚠️ Note: provider ToS restrict Coding Plan keys to designated coding tools and prohibit automated API usage. Using them in CI review may violate the terms and risk key suspension — evaluate before use.
+> - `provider: glm-coding` → `https://open.bigmodel.cn/api/coding/paas/v4` (model: `glm-5.3`)
+> - `provider: doubao-coding` → `https://ark.cn-beijing.volces.com/api/coding/v3` (model: `ark-code-latest`, Doubao/GLM/Kimi whitelisted)
+> - `provider: minimax-token` → `https://api.minimaxi.com/v1` with a `sk-cp-` key (model: `MiniMax-M2.7`; same endpoint as pay-as-you-go — only the key differs)
+> DeepSeek and Kimi (Moonshot) offer no subscription plans (pure pay-as-you-go); `kimi-k2.5` etc. appear inside Ali/Volcengine plan whitelists as aggregated third-party models.
+> ⚠️ Note: provider ToS restrict plan keys to designated coding tools and prohibit automated API usage. Using them in CI review may violate the terms and risk key suspension — evaluate before use.
 > - **Custom Proxy / Self-hosted**: Explicit `llm_endpoint: https://your-gateway/v1` always takes highest precedence.
 
 ## Configuration (`.github/inori.yml`)

@@ -151,5 +151,35 @@ describe("Coding Plan key/端点防呆警告", () => {
     warn.mockRestore();
     delete process.env.INPUT_LLM_API_KEY;
   });
+
+  it("MiniMax sk-cp- 订阅 key 配非 minimaxi 端点时警告", () => {
+    process.env.INPUT_LLM_API_KEY = "sk-cp-xxxxx";
+    const warn = vi.spyOn(core, "warning").mockImplementation(() => {});
+    readLlmSettings(
+      minimalConfig({
+        provider: "deepseek",
+        providerName: "DeepSeek",
+        llmEndpoint: "https://api.deepseek.com/v1",
+      })
+    );
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("minimaxi.com"));
+    warn.mockRestore();
+    delete process.env.INPUT_LLM_API_KEY;
+  });
+
+  it("MiniMax sk-cp- key 配 minimax 端点（按量/订阅共用）不警告", () => {
+    process.env.INPUT_LLM_API_KEY = "sk-cp-xxxxx";
+    const warn = vi.spyOn(core, "warning").mockImplementation(() => {});
+    readLlmSettings(
+      minimalConfig({
+        provider: "minimax-token",
+        providerName: "MiniMax Token Plan",
+        llmEndpoint: "https://api.minimaxi.com/v1",
+      })
+    );
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+    delete process.env.INPUT_LLM_API_KEY;
+  });
 });
 
