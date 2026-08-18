@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.2](https://github.com/VOD-Studio/inori/compare/v0.2.1...v0.2.2) (2026-08-18)
+
+
+### 修复
+
+* **ci:** 修复 major 浮动 tag 的重复 v 前缀 ([2fb8f26](https://github.com/VOD-Studio/inori/commit/2fb8f264636b602fd338fbb4f303af066347a80d))
+* **ci:** 修复 major 浮动 tag 的重复 v 前缀 ([3c3a35e](https://github.com/VOD-Studio/inori/commit/3c3a35edb3b5513cfb8c5a2f6d44bb22c171b05d))
+
 ## [0.2.1](https://github.com/VOD-Studio/inori/compare/v0.2.0...v0.2.1) (2026-08-18)
 
 
