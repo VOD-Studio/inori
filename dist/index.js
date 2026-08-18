@@ -43217,12 +43217,13 @@ function formatDiffAndTruncate(files, maxDiffChars, lang = "zh") {
 //
 // ⚠️ defaultModel 是「快照值」，各平台模型目录迭代快（火山方舟等按月滚动），
 // 未显式配置 llm_model 时才会用到。生产环境建议显式指定模型。
-// 验证状态（2026-08-18，对照官方文档）：
-//   已验证：deepseek/moonshot/dashscope/volcengine/github-models/openai/anthropic
-//   端点探测通过（401/400 = 路径存在）：zhipu/siliconflow/baidu/tencent/lingyi/
-//     stepfun/baichuan/infinigence/minimax
-//   未验证（保留快照）：groq/mistral/perplexity/openrouter/together/fireworks/
-//     ollama/local 及各家的 defaultModel 明细
+// 验证状态（2026-08-18，官方文档 + 无 key 端点探测）：
+//   已对照官方文档核验 defaultModel：deepseek/moonshot/dashscope/volcengine/
+//     github-models/openai/anthropic/groq/openrouter/mistral/perplexity/zhipu
+//   端点探测通过（401/400/405 = 路径存在）：全部 24 家
+//   defaultModel 未验证（保留快照，标注）：siliconflow/baidu/tencent/lingyi/
+//     stepfun/baichuan/infinigence/together/minimax(M2 世代由 Groq/Fireworks
+//     托管记录佐证，自家平台文档为 SPA 未能程序化核验)
 const PROVIDER_PRESETS = [
     // ── 1. DeepSeek ──
     {
@@ -43245,9 +43246,9 @@ const PROVIDER_PRESETS = [
     // ── 3. 智谱 AI (Zhipu / BigModel / GLM / CodeGeeX / Coding Plan) ──
     {
         id: "zhipu",
-        name: "智谱 AI (GLM / CodeGeeX)",
+        name: "智谱 AI (GLM)",
         defaultEndpoint: "https://open.bigmodel.cn/api/paas/v4",
-        defaultModel: "glm-4-flash",
+        defaultModel: "glm-4.7-flash",
         aliases: ["bigmodel", "zhipuai", "glm", "codegeex"],
         modelPatterns: [/^(glm-|codegeex)/i],
     },
@@ -43258,7 +43259,7 @@ const PROVIDER_PRESETS = [
         defaultEndpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1",
         defaultModel: "qwen-plus",
         aliases: ["qwen", "aliyun", "tongyi", "alibaba", "bailian"],
-        modelPatterns: [/^(qwen-|qwen2\.|qwen2\.5-|tongyi)/i],
+        modelPatterns: [/^(qwen(?!\/)|tongyi)/i],
     },
     // ── 5. 硅基流动 (SiliconFlow) ──
     {
@@ -43290,9 +43291,9 @@ const PROVIDER_PRESETS = [
     // ── 8. MiniMax (海螺 AI / Coding Plan) ──
     {
         id: "minimax",
-        name: "MiniMax (海螺 AI)",
+        name: "MiniMax",
         defaultEndpoint: "https://api.minimax.chat/v1",
-        defaultModel: "MiniMax-Text-01",
+        defaultModel: "MiniMax-M2",
         aliases: ["hailuo", "abab"],
         modelPatterns: [/^(minimax|abab)/i],
     },
@@ -43355,7 +43356,7 @@ const PROVIDER_PRESETS = [
         id: "anthropic",
         name: "Anthropic (Claude)",
         defaultEndpoint: "https://api.anthropic.com/v1",
-        defaultModel: "claude-3-5-sonnet-20241022",
+        defaultModel: "claude-sonnet-4-20250514",
         aliases: ["claude"],
         modelPatterns: [/^claude/i],
     },
@@ -43364,7 +43365,7 @@ const PROVIDER_PRESETS = [
         id: "openrouter",
         name: "OpenRouter",
         defaultEndpoint: "https://openrouter.ai/api/v1",
-        defaultModel: "deepseek/deepseek-chat",
+        defaultModel: "deepseek/deepseek-chat-v3.1",
         aliases: ["open-router"],
         modelPatterns: [/^openrouter\//i],
     },
@@ -43373,7 +43374,7 @@ const PROVIDER_PRESETS = [
         id: "groq",
         name: "Groq",
         defaultEndpoint: "https://api.groq.com/openai/v1",
-        defaultModel: "llama-3.3-70b-versatile",
+        defaultModel: "openai/gpt-oss-120b",
         aliases: [],
         modelPatterns: [/^(llama-|mixtral-|gemma-)/i],
     },
@@ -43400,7 +43401,7 @@ const PROVIDER_PRESETS = [
         id: "fireworks",
         name: "Fireworks AI",
         defaultEndpoint: "https://api.fireworks.ai/inference/v1",
-        defaultModel: "accounts/fireworks/models/deepseek-v3",
+        defaultModel: "accounts/fireworks/models/kimi-k2-instruct-0905",
         aliases: ["fireworks-ai"],
         modelPatterns: [/^accounts\/fireworks\//i],
     },

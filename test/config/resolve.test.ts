@@ -114,7 +114,7 @@ describe("resolveConfig 优先级：Action Inputs > 配置文件 > 内置默认�
     const resolved = resolveConfig(inputs(), { provider: "zhipu" });
     expect(resolved.provider).toBe("zhipu");
     expect(resolved.llmEndpoint).toBe("https://open.bigmodel.cn/api/paas/v4");
-    expect(resolved.llmModel).toBe("glm-4-flash");
+    expect(resolved.llmModel).toBe("glm-4.7-flash");
     expect(resolved.codingPlan).toBe(true);
     expect(resolved.isCustomEndpoint).toBe(false);
   });

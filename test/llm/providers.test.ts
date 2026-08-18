@@ -100,6 +100,8 @@ describe("detectProviderByModel 通过模型特征模式自动推断 Provider", 
 
     expect(detectProviderByModel("qwen-plus")?.id).toBe("dashscope");
     expect(detectProviderByModel("qwen-coder-plus")?.id).toBe("dashscope");
+    expect(detectProviderByModel("qwen3-max")?.id).toBe("dashscope");
+    expect(detectProviderByModel("qwen3-coder-plus")?.id).toBe("dashscope");
     expect(detectProviderByModel("qwen2.5-coder-32b-instruct")?.id).toBe("dashscope");
 
     expect(detectProviderByModel("kimi-k2.6")?.id).toBe("moonshot");
@@ -144,7 +146,7 @@ describe("resolveLlmEndpointAndModel 综合自动补全与自定义优先级", (
   it("场景 1: 用户仅指定 provider（如 zhipu），自动补全其 URL 与默认模型", () => {
     const res = resolveLlmEndpointAndModel({ provider: "zhipu" });
     expect(res.endpoint).toBe("https://open.bigmodel.cn/api/paas/v4");
-    expect(res.model).toBe("glm-4-flash");
+    expect(res.model).toBe("glm-4.7-flash");
     expect(res.provider).toBe("zhipu");
     expect(res.isCustomEndpoint).toBe(false);
   });
