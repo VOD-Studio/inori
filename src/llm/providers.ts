@@ -6,8 +6,8 @@
 // 未显式配置 llm_model 时才会用到。生产环境建议显式指定模型。
 // 验证状态（2026-08-18，官方文档 + 无 key 端点探测）：
 //   已对照官方文档核验 defaultModel：deepseek/moonshot/dashscope/volcengine/
-//     github-models/openai/anthropic/groq/openrouter/mistral/perplexity/zhipu
-//   端点探测通过（401/400/405 = 路径存在）：全部 24 家
+//     github-models/openai/anthropic/groq/openrouter/mistral/perplexity/zhipu/
+//     google（Gemini OpenAI 兼容层，文档 2026-08-17）/ xai（grok-4.6，文档 2026-08-12）
 //   defaultModel 未验证（保留快照，标注）：siliconflow/baidu/tencent/lingyi/
 //     stepfun/baichuan/infinigence/together（端点探测通过，模型名保留快照）
 //
@@ -16,6 +16,10 @@
 //   minimax-token（MiniMax sk-cp-）——key 与端点均与按量计费不互通。
 //   DeepSeek 与 Kimi（Moonshot）官方无订阅套餐，纯按量计费；
 //   kimi-k2.5 等模型是阿里/火山套餐白名单里的聚合第三方模型。
+//
+// omp（oh-my-pi）内置 provider 目录对齐审计（2026-08-18）：新增 google/xai；
+// cerebras/nvidia/huggingface/novita/zai（智谱国际站）等因本次网络受限
+// 未能对官方文档核验端点/模型，暂不收录——待验证后补齐，不猜测。
 
 export interface ProviderPreset {
   /** 唯一标准标识符（全小写） */
@@ -50,6 +54,27 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     defaultModel: "gpt-4o-mini",
     aliases: ["chatgpt"],
     modelPatterns: [/^(gpt-|o1|o3|chatgpt)/i],
+  },
+  // ── 2a. Gemini（Google，id: google）──
+  // OpenAI 兼容层（官方文档 2026-08-17）：/v1beta/openai/ + Bearer GEMINI_API_KEY。
+  {
+    id: "google",
+    name: "Gemini",
+    defaultEndpoint: "https://generativelanguage.googleapis.com/v1beta/openai",
+    defaultModel: "gemini-3.7-flash",
+    aliases: ["gemini", "google-ai"],
+    modelPatterns: [/^gemini/i],
+  },
+  // ── 2b. Grok（xAI，id: xai）──
+  // 官方 OpenAI SDK 兼容（base https://api.x.ai/v1）；注意官方示例主推
+  // /responses，/chat/completions 标记为 Legacy 但仍在服务。
+  {
+    id: "xai",
+    name: "Grok",
+    defaultEndpoint: "https://api.x.ai/v1",
+    defaultModel: "grok-4.6",
+    aliases: ["grok", "x-ai"],
+    modelPatterns: [/^grok/i],
   },
   // ── 3. GLM（智谱，id: zhipu）──
   {
@@ -398,6 +423,8 @@ export function resolveLlmEndpointAndModel(input: ResolveLlmInput = {}): Resolve
 export const PROVIDER_ENV_KEYS: Readonly<Record<string, string>> = {
   deepseek: "DEEPSEEK_API_KEY",
   openai: "OPENAI_API_KEY",
+  google: "GEMINI_API_KEY",
+  xai: "XAI_API_KEY",
   zhipu: "ZHIPU_API_KEY",
   dashscope: "DASHSCOPE_API_KEY",
   siliconflow: "SILICONFLOW_API_KEY",

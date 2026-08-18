@@ -58,9 +58,10 @@ jobs:
 > - **Qwen**：`provider: qwen`（或 `llm_model: qwen-plus`, `qwen3-coder-plus`）
 > - **SiliconFlow**：`provider: siliconflow`
 > - **Kimi**：`provider: kimi`（或 `llm_model: kimi-k2.6`）
-> - **OpenAI**：`provider: openai`（或 `llm_model: gpt-4o-mini`, `gpt-4o`）
+> - **Gemini**：`provider: google`（或 `llm_model: gemini-3.7-flash`）
+> - **Grok**：`provider: xai`（或 `llm_model: grok-4.6`）
 > - **Claude**：`provider: anthropic`（或 `llm_model: claude-sonnet-4`）
-> - **Doubao / ERNIE / Hunyuan / Yi / Groq / OpenRouter / Mistral / Ollama / MiniMax ...**（内置 24+ 主流预设）
+> - **Doubao / ERNIE / Hunyuan / Yi / Groq / OpenRouter / Mistral / Ollama / MiniMax ...**（内置 26+ 主流预设）
 >
 > **订阅套餐**（固定月费额度）使用**独立的端点与 key 体系**，与按量计费凭据**不互通**：
 > - `provider: qwen-coding` → `https://coding.dashscope.aliyuncs.com/v1`，需 `sk-sp-` 套餐 key（模型：`qwen3-coder-plus`、`kimi-k2.5`、`glm-5`、`MiniMax-M2.5` 等）

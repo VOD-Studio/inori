@@ -30,7 +30,8 @@ describe("PROVIDER_PRESETS 预设完整性与合法性", () => {
     expect(ids).toContain("baichuan");
     expect(ids).toContain("infinigence");
 
-    // 国际主流与开源/本地
+    expect(ids).toContain("google");
+    expect(ids).toContain("xai");
     expect(ids).toContain("openai");
     expect(ids).toContain("anthropic");
     expect(ids).toContain("openrouter");
@@ -129,6 +130,10 @@ describe("detectProviderByModel 通过模型特征模式自动推断 Provider", 
     expect(detectProviderByModel("gpt-4o-mini")?.id).toBe("openai");
     expect(detectProviderByModel("o1-mini")?.id).toBe("openai");
     expect(detectProviderByModel("o3-mini")?.id).toBe("openai");
+
+    expect(detectProviderByModel("gemini-2.5-pro")?.id).toBe("google");
+    expect(detectProviderByModel("gemini-3.7-flash")?.id).toBe("google");
+    expect(detectProviderByModel("grok-4.6")?.id).toBe("xai");
 
     expect(detectProviderByModel("claude-3-5-sonnet-20241022")?.id).toBe("anthropic");
     expect(detectProviderByModel("claude-3-7-sonnet")?.id).toBe("anthropic");
