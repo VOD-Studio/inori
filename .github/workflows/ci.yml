@@ -1,10 +1,11 @@
 # CI 流水线
 #
-# PR 和 push 到 main 时触发。顺序：typecheck → test → build → dist 一致性校验。
-# dist/ 必须与 src/ 同步提交（node20 action 在 runner 上直接跑 dist/index.js，
+# PR 和 push 到 main 时触发。顺序：lint → typecheck → test → build → dist 一致性校验。
+# dist/ 必须与 src/ 同步提交（node24 action 在 runner 上直接跑 dist/index.js，
 # 不执行 build），因此「dist 是否最新」是这类项目的核心检查项。
 #
 # 任一步骤失败则 PR 检查失败，阻止合并。
+# release-please 的 release PR（只改 CHANGELOG 与 manifest）也走本流水线。
 
 name: CI
 
@@ -24,11 +25,12 @@ permissions:
 
 jobs:
   check:
-    name: Typecheck · Test · Build
+    name: Lint · Typecheck · Test · Build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
@@ -36,13 +38,18 @@ jobs:
           version: 10
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "24"
           cache: pnpm
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      # lint 前置：比 test/build 快，提前暴露格式与静态错误，fail fast
+      # biome check = lint + format + import 排序，保证本地与 CI 红绿一致
+      - name: Lint
+        run: pnpm lint
 
       - name: Typecheck
         run: pnpm typecheck
@@ -54,7 +61,7 @@ jobs:
         run: pnpm build
 
       # dist 一致性校验：贡献者改了 src/ 但忘了重新 build 并提交 dist/
-      # 是 node20 action 的头号 bug 来源。build 重新生成 dist 后若与提交内容
+      # 是 node action 的头号 bug 来源。build 重新生成 dist 后若与提交内容
       # 不一致，说明 dist 过期，直接失败。
       - name: Verify dist is up to date
         run: |
@@ -67,9 +74,10 @@ jobs:
   audit:
     name: Dependency audit
     runs-on: ubuntu-latest
+    timeout-minutes: 5
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
@@ -77,7 +85,7 @@ jobs:
           version: 10
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "24"
           cache: pnpm
