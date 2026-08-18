@@ -1,5 +1,9 @@
 # Inori
 
+<p align="center">
+  <a href="README.md">English</a> | <a href="README.zh-CN.md">简体中文</a>
+</p>
+
 AI code review for pull requests — works with **any OpenAI-compatible LLM endpoint**.
 
 Inori reviews your PR diff and posts findings as **inline comments anchored to real diff lines** (plus a summary comment). It runs entirely inside your GitHub Actions on the LLM provider you configure — no third-party SaaS sees your code, and you bring your own API key.
@@ -8,9 +12,10 @@ Inori reviews your PR diff and posts findings as **inline comments anchored to r
 
 - **Any OpenAI-compatible endpoint.** DeepSeek, Moonshot (Kimi), GLM, Qwen, local Ollama, or OpenAI itself — if it speaks the `/chat/completions` API, Inori works with it.
 - **Inline comments on real lines.** Every comment's line number is validated against the actual diff before posting; comments that don't land on a real added line fall back to the summary instead of dangling.
-- **Idempotent re-reviews.** Each push re-reviews the PR and replaces Inori's previous feedback — stale inline comments are deleted and the summary review is updated in place — instead of stacking duplicates.
-- **Native GitHub Action.** Built on Node 24 with the official `@actions/*` SDK — a single self-contained `dist/index.js`, no runtime install step on the runner.
-- **Bring your own key.** No per-seat subscription; you pay your LLM provider directly.
+- **Review discipline & convergence.** Built-in strict review constraints prevent LLMs from degenerating into "defensive exhaustion" during multi-round re-reviews — focuses on real defects, bans unprompted defensive boilerplate suggestions, mandates verbatim quoting, and calibrates severities objectively.
+- **Smart re-reviews (`on_update`).** Configurable handling of previous review comments (`replace` to delete stale ones, `resolve` to automatically resolve threads via GraphQL, or `keep` to retain history) without messy duplicate stacking.
+- **Smart early exit & safety.** Automatically skips draft PRs, bot PRs (`dependabot`, `renovate`, `release-please`), and empty diffs to eliminate wasted API calls. Diffs are safely truncated on file boundaries (`diff --git`) to prevent LLM hallucinations from split code blocks.
+- **Repository configuration (`.github/inori.yml`).** Manage review settings, ignore rules, and team coding guidelines directly in your codebase with version control.
 
 ## Quick start
 
@@ -54,6 +59,37 @@ jobs:
 > - OpenAI: `https://api.openai.com/v1` / `gpt-4o-mini`
 > - Local Ollama: `http://host:11434/v1` / `llama3`
 
+## Configuration (`.github/inori.yml`)
+
+In addition to Action workflow inputs, you can manage review settings, ignored paths, and team coding guidelines in `.github/inori.yml` (or `.github/inori.yaml`) in your repository:
+
+```yaml
+# .github/inori.yml
+language: zh
+on_update: resolve          # replace | resolve | keep (default: replace)
+skip_draft: true            # skip review when PR is a draft (default: true)
+ignore_bots: true           # skip review for bot-created PRs (default: true)
+ignore_authors:             # skip specific usernames
+  - "release-bot"
+ignore_patterns:            # additional glob patterns (merged with built-in ignores)
+  - "*.generated.ts"
+  - "fixtures/**"
+custom_instructions: |
+  1. 所有前端组件禁止内联样式，统一使用 Tailwind CSS。
+  2. 新增导出函数与接口必须附带完整 TSDoc 注释。
+  3. 涉及金额与数量的计算必须使用 Decimal 库，严禁使用原生浮点数。
+```
+
+**Precedence**: Action workflow inputs (`with:`) > `.github/inori.yml` > Built-in defaults.
+
+### Built-in Ignored Files
+
+Inori automatically ignores common non-reviewable files by default (no need to repeat them in `ignore_patterns`):
+- **Lockfiles**: `pnpm-lock.yaml`, `package-lock.json`, `yarn.lock`, `go.sum`, `Cargo.lock`, `poetry.lock`, `composer.lock`
+- **Minified code & maps**: `*.min.js`, `*.min.css`, `*.map`
+- **Vector assets**: `*.svg`
+- **Release manifests & changelogs**: `CHANGELOG.md`, `.release-please-manifest.json`
+
 ## Inputs
 
 | Input | Description | Required | Default |
@@ -61,27 +97,32 @@ jobs:
 | `llm_endpoint` | OpenAI-compatible API base URL | ✅ | — |
 | `llm_model` | Model name (used for the API call and shown in the review title) | ✅ | — |
 | `llm_api_key` | API key for the LLM endpoint | ✅ | — |
-| `github_token` | GitHub token with `pull-requests:write` | — | `${{ github.token }}` |
+| `github_token` | GitHub token with `pull-requests:write`. Defaults to the workflow token. | — | `${{ github.token }}` |
 | `language` | Output language for review comments: `zh` \| `en` | — | `zh` |
-| `ignore_patterns` | Comma-separated globs of files to skip | — | `pnpm-lock.yaml,go.sum,package-lock.json,yarn.lock,CHANGELOG.md` |
-| `max_diff_chars` | Character limit before the diff is truncated | — | `40000` |
+| `ignore_patterns` | Comma-separated globs of extra files to skip (in addition to built-in ignore rules) | — | — |
+| `max_diff_chars` | Character limit before diff is safely truncated at file boundaries | — | `40000` |
 | `max_body_chars` | Character limit for the review body (GitHub caps at 65536) | — | `60000` |
 | `custom_instructions` | Extra review rules appended to the prompt (team conventions, banned APIs, etc.) | — | — |
+| `on_update` | How to handle previous comments on re-review: `replace` (delete old), `resolve` (resolve threads via GraphQL), `keep` | — | `replace` |
+| `skip_draft` | Skip review when PR is in draft status | — | `true` |
+| `ignore_bots` | Skip review for bot-created PRs (e.g. dependabot, renovate, release-please) | — | `true` |
+| `ignore_authors` | Comma-separated PR author usernames to skip | — | — |
+| `keep_previous_comments` | Legacy switch: whether to keep previous comments (alias for `on_update: keep`) | — | `false` |
 
 ## How it works
 
-1. Fetches the PR's changed files via the GitHub API (paginated — handles PRs with 100+ files).
-2. Builds a diff, skipping files matching `ignore_patterns`. Large diffs are truncated to `max_diff_chars`.
-3. Sends the diff to your LLM with a structured prompt that asks for strict JSON output and includes a prompt-injection guard (diff content is treated as untrusted data).
-4. Parses the JSON response. Findings with a valid line number (one that matches a real `+` added line in the diff) become inline comments; the rest go into the summary.
-5. Replaces the previous Inori feedback: stale inline comments (identified by a hidden marker embedded in each body) are deleted — except threads someone has replied to — and the summary review body is updated in place. GitHub's REST API can't delete submitted reviews, so Inori reuses a single review per PR instead of stacking new ones.
-
-When the diff is truncated, inline anchoring is disabled entirely — all findings go into the summary to avoid comments landing on lines the model never saw.
+1. **Smart early exits**: Evaluates PR metadata to skip execution for drafts (`skip_draft: true`), bot PRs (`ignore_bots: true`), or designated authors (`ignore_authors`), saving API budget.
+2. **Safe diff preprocessing**: Changed files are filtered against built-in and custom ignore patterns. When the total diff exceeds `max_diff_chars`, truncation cuts at clean file boundaries to preserve syntactic integrity and prevent LLM syntax hallucinations. If all changes are ignored (diff is empty), the action exits cleanly.
+3. **Prompt discipline & injection safety**: The prompt enforces four strict review disciplines (strict bar for reporting, explicit exclusion of defensive over-engineering, verbatim quoting verification, and objective severity calibration) alongside anti-injection defenses.
+4. **Inline validation**: Findings with valid line numbers matching `+` added diff lines are posted as inline comments; invalid anchors safely fall back to the summary.
+5. **Re-review lifecycle (`on_update`)**:
+   - `replace` (default): Stale Inori inline comments are deleted (threads with user replies are always preserved) and summary is updated in place.
+   - `resolve`: Stale Inori review threads are marked as **Resolved** via the GitHub GraphQL API, keeping a clean view while preserving audit history.
+   - `keep`: Stale comments are left intact on the diff.
 
 ## Data privacy
 
 The PR diff is sent **as-is** to the LLM endpoint you configure. No third party beyond your chosen LLM provider sees your code. Review the data-handling practices of your provider before enabling Inori on private repositories.
-
 ## License
 
 [MIT](LICENSE)
