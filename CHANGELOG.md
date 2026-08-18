@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.1](https://github.com/VOD-Studio/inori/compare/v0.2.0...v0.2.1) (2026-08-18)
+
+
+### 修复
+
+* **ci:** 修复发版链路的 manifest 格式冲突与浮动 tag 缺失 ([c1984f8](https://github.com/VOD-Studio/inori/commit/c1984f8c1838e96d6a4fa40157b200f80ec12608))
+* **ci:** 修复发版链路的 manifest 格式冲突与浮动 tag 缺失 ([e983a6a](https://github.com/VOD-Studio/inori/commit/e983a6a7a57ff91352cd4246ca4b80a2bc48cbbc))
+
 ## [0.2.0](https://github.com/VOD-Studio/inori/compare/v0.1.0...v0.2.0) (2026-08-18)
 
 
@@ -30,4 +38,3 @@
 * 分层架构重构 ([08399d2](https://github.com/VOD-Studio/inori/commit/08399d2e2133cd56e356123101bb5e25897a181a))
 * 删除长尾 provider 预设，聚焦主流（28 → 22） ([68ed4ef](https://github.com/VOD-Studio/inori/commit/68ed4efd1984e8637e10a8633abd70763500afee))
 * 抽离纯逻辑到 src/logic.ts 并修复 parseReviews null 崩溃 ([cdcce90](https://github.com/VOD-Studio/inori/commit/cdcce9078ebfe6e46e009966893ee17e56fd14c7))
-
