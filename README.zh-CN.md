@@ -14,7 +14,7 @@ Inori 会分析 PR 的代码变更（diff），并将评审意见以**精准锚�
 - **精准锚定真实变更行**：每条 Inline 评论在发布前都会比对 PR 实际 diff 中的新增行（`+` 行），行号不合法的意见自动降级放入总结报告，杜绝悬空评论。
 - **收口纪律与防发散机制**：内置严格的评审纪律（够格标准、明确排除防御性穷举与教程化建议、逐字核对引文、客观校准严重度），彻底解决多轮 Re-review 模型陷入低价值挑刺和防御性穷举的问题。
 - **智能 Re-review 生命周期管理（`on_update`）**：支持灵活配置旧评审的处理方式 —— `replace`（清理旧评论重新发布）、`resolve`（通过 GraphQL 将旧评审线程标记为 Resolved 已解决）、`keep`（保留历史记录），告别红点堆叠。
-- **智能早退与安全截断**：自动识别并跳过草稿 PR（`skip_draft`）、机器人 PR（`ignore_bots`，如 Dependabot/Renovate 等）及空变更，节省 API 预算；超长 Diff 按文件块边界（`diff --git`）安全截断，防止半截代码引发语法幻觉。
+- **智能早退与安全截断**：自动识别并跳过草稿 PR（`skip_draft`）、机器人 PR（`ignore_bots`，官方 Bot 账号即登录名带 `*[bot]` 后缀或账号类型为 `type: Bot`，如 `dependabot[bot]`、`renovate[bot]`）及空变更，节省 API 预算；超长 Diff 按文件块边界安全截断，防止半截代码引发语法幻觉。
 - **支持仓库级配置文件（`.github/inori.yml`）**：支持在仓库中通过 YAML 文件对团队编码规范和评审要求进行版本化管理，保持 Workflow 极简。
 - **自带 API Key 零坐席成本**：无需购买第三方席位订阅，按需直接向模型服务商付费。
 
@@ -29,7 +29,7 @@ name: Inori Review
 
 on:
   pull_request:
-    types: [opened, reopened, synchronize]
+    types: [opened, reopened, synchronize, ready_for_review]
 
 # 当 PR 有新 push 时自动取消旧运行，避免重复评审
 concurrency:
@@ -106,20 +106,20 @@ Inori 默认自动忽略以下常见非评审文件（无需在 `ignore_patterns
 | `custom_instructions` | 附加评审规则（团队规范、禁止调用的 API 等） | — | — |
 | `on_update` | Re-review 时旧评论处理方式：`replace`（删除旧评论） \| `resolve`（GraphQL 标记解决） \| `keep`（保留） | — | `replace` |
 | `skip_draft` | 草稿 PR 是否跳过评审 | — | `true` |
-| `ignore_bots` | 是否跳过 Bot 创建的 PR（如 dependabot、renovate、release-please） | — | `true` |
+| `ignore_bots` | 是否跳过 Bot 创建的 PR（官方 Bot 账号：登录名带 `*[bot]` 后缀或 `type: Bot`；其他自动化账号请用 `ignore_authors`） | — | `true` |
 | `ignore_authors` | 逗号分隔的跳过评审的作者用户名列表 | — | — |
 | `keep_previous_comments` | 兼容旧版开关：设为 true 保留旧评论（等同于 `on_update: keep`） | — | `false` |
 
 ## 工作原理
 
-1. **智能早退判定**：在执行前检查 PR 状态，若命中草稿 PR（`skip_draft`）、机器人 PR（`ignore_bots`）或指定作者名单（`ignore_authors`），直接早退不消耗 Token。
-2. **Diff 预处理与安全截断**：获取 PR 变更文件并应用内置与自定义忽略规则。当 Diff 总长度超出 `max_diff_chars` 时，回退到上一个完整文件边界（`diff --git`）截断，保证每个送审文件的语法结构完整，杜绝半截括号等导致的幻觉。若过滤后无有效变更，则正常退出。
+1. **智能早退判定**：在执行前检查 PR 状态，若命中草稿 PR（`skip_draft`）、机器人 PR（`ignore_bots`）或指定作者名单（`ignore_authors`），直接早退不消耗 Token。请在触发事件的 `types` 中包含 `ready_for_review`，使草稿 PR 标记「准备好评」后自动触发评审。
+2. **Diff 预处理与安全截断**：获取 PR 变更文件并应用内置与自定义忽略规则。当 Diff 总长度超出 `max_diff_chars` 时，回退到上一个完整文件块边界截断，保证每个送审文件的语法结构完整，杜绝半截括号等导致的幻觉。若过滤后无有效变更，则正常退出。
 3. **结构化 Prompt 与纪律约束**：Prompt 内置系统防注入保护，并施加四条严格纪律（够格标准、明确排除防御性补全、引文逐字核对、严重度客观校准），引导模型聚焦高价值缺陷。
 4. **行号合法性校验**：模型输出的评审意见如果对应目标文件真实的新增行（`+` 行），则发布为行内评论（Inline Comment）；行号无法匹配的意见自动汇总到 Summary。
 5. **多轮评审生命周期（`on_update`）**：
    - `replace`（默认）：清理上一轮 inori 的未回复行内评论，并在原评审上就地更新 Summary。
    - `resolve`：通过 GitHub GraphQL API 将上一轮未回复的评审线程标记为 **Resolved**（已解决），GitHub 会折叠隐藏旧意见，保持页面清爽同时保留修复轨迹。
-   - `keep`：不作处理，保留全部历史评论。
+   - `keep`：不作处理，保留全部历史行内评论（Summary 仍在原评审上就地更新）。
 
 ## 数据与隐私
 

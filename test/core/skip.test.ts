@@ -13,7 +13,8 @@ describe("shouldSkipReview 智能早退 (Issue 3)", () => {
     expect(res.skip).toBe(false);
   });
 
-  it("识别各类 Bot 账号并早退", () => {
+  it("识别 GitHub 官方 Bot 信号并早退", () => {
+    // App 账号登录名带 "[bot]" 后缀(dependabot[bot]、renovate[bot] 等)
     expect(
       shouldSkipReview({
         author: { login: "dependabot[bot]" },
@@ -24,12 +25,13 @@ describe("shouldSkipReview 智能早退 (Issue 3)", () => {
 
     expect(
       shouldSkipReview({
-        author: { login: "renovate-bot" },
+        author: { login: "renovate[bot]", type: "Bot" },
         ignoreBots: true,
         lang: "zh",
       }).skip
     ).toBe(true);
 
+    // 账号 type 标记为 Bot(如 GitHub App 代发)
     expect(
       shouldSkipReview({
         author: { login: "custom-user", type: "Bot" },
@@ -37,6 +39,24 @@ describe("shouldSkipReview 智能早退 (Issue 3)", () => {
         lang: "en",
       }).reason
     ).toBe("Skipping bot PR review (custom-user)");
+  });
+
+  it("真人账号不因启发式误伤", () => {
+    // 不做 "-bot" 后缀等猜测:非官方 Bot 信号一律评审,
+    // 需要跳过的自动化账号可显式列入 ignore_authors
+    expect(
+      shouldSkipReview({
+        author: { login: "renovate-bot", type: "User" },
+        ignoreBots: true,
+      }).skip
+    ).toBe(false);
+
+    expect(
+      shouldSkipReview({
+        author: { login: "humans-with-bot-in-name", type: "User" },
+        ignoreBots: true,
+      }).skip
+    ).toBe(false);
   });
 
   it("命中 ignoreAuthors 时早退", () => {

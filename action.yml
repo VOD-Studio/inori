@@ -20,41 +20,41 @@ inputs:
     required: true
     default: ${{ github.token }}
   language:
-    description: 'Output language for review comments: zh | en'
+    description: 'Output language for review comments: zh | en (default zh; fallback order: input > .github/inori.yml)'
     required: false
-    default: 'zh'
+    default: ''
   ignore_patterns:
     description: 'Comma-separated glob patterns of additional files to skip (built-in defaults include lockfiles, minified files, svg, etc.)'
     required: false
     default: ''
   max_diff_chars:
-    description: 'Character limit before the diff is truncated (controls LLM context cost)'
+    description: 'Character limit before the diff is truncated at a file boundary (default 40000)'
     required: false
-    default: '40000'
+    default: ''
   max_body_chars:
-    description: 'Character limit for the review body (GitHub caps at 65536)'
+    description: 'Character limit for the review body (GitHub caps at 65536; default 60000)'
     required: false
-    default: '60000'
+    default: ''
   custom_instructions:
     description: 'Extra review rules appended to the prompt (team conventions, banned APIs, etc.)'
     required: false
     default: ''
   on_update:
-    description: 'How to handle previous review comments on re-review: replace | resolve | keep'
+    description: 'How to handle previous review comments on re-review: replace | resolve | keep (default replace)'
     required: false
-    default: 'replace'
+    default: ''
   keep_previous_comments:
-    description: 'Legacy switch: whether to keep previous inline comments without deletion (equivalent to on_update: keep)'
+    description: 'Legacy switch: keep previous inline comments without deletion (equivalent to on_update: keep)'
     required: false
-    default: 'false'
+    default: ''
   skip_draft:
-    description: 'Skip review when the pull request is in draft status'
+    description: 'Skip review when the pull request is in draft status (default true; triggers again on ready_for_review)'
     required: false
-    default: 'true'
+    default: ''
   ignore_bots:
-    description: 'Skip review for bot-created pull requests'
+    description: 'Skip review for bot-created pull requests (default true)'
     required: false
-    default: 'true'
+    default: ''
   ignore_authors:
     description: 'Comma-separated list of PR author usernames to skip'
     required: false

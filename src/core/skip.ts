@@ -30,13 +30,11 @@ export function shouldSkipReview(params: SkipCheckParams): SkipResult {
   const login = params.author?.login ?? "";
   const type = params.author?.type ?? "";
 
-  // 2. Bot PR
+  // 2. Bot PR（仅认 GitHub 官方信号：账号 type=Bot，或 "[bot]" 后缀的
+  //    App 账号登录名；不做 "-bot" 之类的启发式猜测，真人可自行加入 ignore_authors）
   if (params.ignoreBots) {
     const isBot =
-      type.toLowerCase() === "bot" ||
-      login.toLowerCase().endsWith("[bot]") ||
-      login.toLowerCase().endsWith("-bot") ||
-      login.toLowerCase().includes("[bot]");
+      type.toLowerCase() === "bot" || login.toLowerCase().endsWith("[bot]");
     if (isBot) {
       return {
         skip: true,
