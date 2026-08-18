@@ -5,37 +5,57 @@ import {
   parseReviews,
   buildPrompt,
   buildReviewBody,
+  formatDiffAndTruncate,
+  parseConfigFile,
+  resolveConfig,
+  shouldSkipReview,
+  DEFAULT_IGNORE_PATTERNS,
   REVIEW_MARKER,
   isRetryableLlmError,
   LlmHttpError,
 } from "../src/logic";
 
-// isIgnored 用 action 的真实默认 patterns（与 action.yml 一致）
-const DEFAULT_PATTERNS = [
-  "pnpm-lock.yaml",
-  "go.sum",
-  "package-lock.json",
-  "yarn.lock",
-  "CHANGELOG.md",
-];
-
-describe("isIgnored", () => {
-  it("根目录精确匹配 lockfile", () => {
-    expect(isIgnored("pnpm-lock.yaml", DEFAULT_PATTERNS)).toBe(true);
-    expect(isIgnored("go.sum", DEFAULT_PATTERNS)).toBe(true);
-    expect(isIgnored("package-lock.json", DEFAULT_PATTERNS)).toBe(true);
+describe("DEFAULT_IGNORE_PATTERNS 与 isIgnored", () => {
+  it("匹配所有主流锁文件", () => {
+    const locks = [
+      "pnpm-lock.yaml",
+      "package-lock.json",
+      "yarn.lock",
+      "go.sum",
+      "Cargo.lock",
+      "poetry.lock",
+      "composer.lock",
+      "sub/dir/Cargo.lock",
+    ];
+    for (const lock of locks) {
+      expect(isIgnored(lock, DEFAULT_IGNORE_PATTERNS)).toBe(true);
+    }
   });
 
-  it("子目录同样匹配（**/<pattern>）", () => {
-    expect(isIgnored("packages/x/pnpm-lock.yaml", DEFAULT_PATTERNS)).toBe(true);
-    expect(isIgnored("apps/web/yarn.lock", DEFAULT_PATTERNS)).toBe(true);
+  it("匹配压缩产物与 sourcemap", () => {
+    expect(isIgnored("dist/bundle.min.js", DEFAULT_IGNORE_PATTERNS)).toBe(true);
+    expect(isIgnored("styles/theme.min.css", DEFAULT_IGNORE_PATTERNS)).toBe(true);
+    expect(isIgnored("dist/app.js.map", DEFAULT_IGNORE_PATTERNS)).toBe(true);
   });
 
-  it("普通源码不命中", () => {
-    expect(isIgnored("src/index.ts", DEFAULT_PATTERNS)).toBe(false);
-    expect(isIgnored("web/app.tsx", DEFAULT_PATTERNS)).toBe(false);
+  it("匹配 SVG 矢量图资源", () => {
+    expect(isIgnored("public/icons/logo.svg", DEFAULT_IGNORE_PATTERNS)).toBe(true);
+    expect(isIgnored("icon.svg", DEFAULT_IGNORE_PATTERNS)).toBe(true);
   });
 
+  it("匹配发版清单与 Changelog", () => {
+    expect(isIgnored("CHANGELOG.md", DEFAULT_IGNORE_PATTERNS)).toBe(true);
+    expect(isIgnored(".release-please-manifest.json", DEFAULT_IGNORE_PATTERNS)).toBe(true);
+    expect(isIgnored("pkg/.release-please-manifest.json", DEFAULT_IGNORE_PATTERNS)).toBe(true);
+  });
+
+  it("普通源码不被忽略", () => {
+    expect(isIgnored("src/index.ts", DEFAULT_IGNORE_PATTERNS)).toBe(false);
+    expect(isIgnored("web/app.tsx", DEFAULT_IGNORE_PATTERNS)).toBe(false);
+    expect(isIgnored("cmd/main.go", DEFAULT_IGNORE_PATTERNS)).toBe(false);
+  });
+});
+describe("isIgnored 自定义模式", () => {
   it("自定义 glob 模式生效", () => {
     expect(isIgnored("README.md", ["*.md"])).toBe(true);
     expect(isIgnored("docs/guide.md", ["*.md"])).toBe(true);
@@ -262,5 +282,212 @@ describe("buildReviewBody", () => {
     const body = buildReviewBody({ summary: "", bodyItems: [], model: "m" }, "en", 60000);
     expect(body).toContain("No significant issues found");
     expect(body.endsWith(REVIEW_MARKER)).toBe(true);
+  });
+});
+
+describe("buildPrompt 收口纪律 (Issue 1)", () => {
+  it("中文 prompt 包含四条评审纪律", () => {
+    const p = buildPrompt("DIFF_CONTENT", "zh");
+    expect(p).toContain("评审纪律");
+    expect(p).toContain("够格标准");
+    expect(p).toContain("明确排除");
+    expect(p).toContain("引文纪律");
+    expect(p).toContain("严重度校准");
+  });
+
+  it("英文 prompt 包含 Review Discipline", () => {
+    const p = buildPrompt("DIFF_CONTENT", "en");
+    expect(p).toContain("Review Discipline");
+    expect(p).toContain("Bar for reporting");
+    expect(p).toContain("Explicit exclusions");
+    expect(p).toContain("Quote accuracy");
+    expect(p).toContain("Severity calibration");
+  });
+});
+
+describe("formatDiffAndTruncate (Issue 4)", () => {
+  it("空文件或无有效 patch 返回空", () => {
+    const res = formatDiffAndTruncate([], 1000);
+    expect(res.diff).toBe("");
+    expect(res.truncated).toBe(false);
+    expect(res.omittedCount).toBe(0);
+
+    const res2 = formatDiffAndTruncate([{ filename: "a.ts", patch: "" }], 1000);
+    expect(res2.diff).toBe("");
+    expect(res2.truncated).toBe(false);
+  });
+
+  it("文件未超限时完整返回", () => {
+    const files = [
+      { filename: "a.ts", patch: "+line 1" },
+      { filename: "b.ts", patch: "+line 2" },
+    ];
+    const res = formatDiffAndTruncate(files, 1000, "zh");
+    expect(res.truncated).toBe(false);
+    expect(res.omittedCount).toBe(0);
+    expect(res.includedFiles).toEqual(["a.ts", "b.ts"]);
+    expect(res.diff).toContain("--- a.ts\n+line 1");
+    expect(res.diff).toContain("--- b.ts\n+line 2");
+  });
+
+  it("超过限制时按文件块安全截断并追加提示文案", () => {
+    const files = [
+      { filename: "a.ts", patch: "+first file patch content" },
+      { filename: "b.ts", patch: "+second file patch content" },
+      { filename: "c.ts", patch: "+third file patch content" },
+    ];
+    // 只够容纳第一个文件，容纳不下第二个文件
+    const chunk1 = "--- a.ts\n+first file patch content";
+    const res = formatDiffAndTruncate(files, chunk1.length + 5, "zh");
+    expect(res.truncated).toBe(true);
+    expect(res.omittedCount).toBe(2);
+    expect(res.includedFiles).toEqual(["a.ts"]);
+    expect(res.diff).toContain("--- a.ts");
+    expect(res.diff).not.toContain("--- b.ts");
+    expect(res.diff).toContain("... (由于长度超限，已略去后续 2 个文件的 diff)");
+  });
+
+  it("英文提示截断文案", () => {
+    const files = [
+      { filename: "a.ts", patch: "+patch a" },
+      { filename: "b.ts", patch: "+patch b" },
+    ];
+    const res = formatDiffAndTruncate(files, 15, "en");
+    expect(res.truncated).toBe(true);
+    expect(res.diff).toContain("due to length limit, diffs of 1 subsequent files omitted");
+  });
+});
+
+describe("parseConfigFile 与 resolveConfig (Issue 5 & Issue 2)", () => {
+  it("解析有效 YAML 配置", () => {
+    const yaml = `
+language: en
+max_diff_chars: 50000
+on_update: resolve
+skip_draft: false
+ignore_bots: false
+ignore_patterns:
+  - "*.generated.ts"
+  - "fixtures/**"
+ignore_authors:
+  - "bot-user"
+custom_instructions: |
+  No inline styles.
+`;
+    const config = parseConfigFile(yaml);
+    expect(config.language).toBe("en");
+    expect(config.max_diff_chars).toBe(50000);
+    expect(config.on_update).toBe("resolve");
+    expect(config.skip_draft).toBe(false);
+    expect(config.ignore_bots).toBe(false);
+    expect(config.ignore_patterns).toEqual(["*.generated.ts", "fixtures/**"]);
+    expect(config.ignore_authors).toEqual(["bot-user"]);
+    expect(config.custom_instructions).toContain("No inline styles.");
+  });
+
+  it("非法 YAML 容错返回空对象", () => {
+    expect(parseConfigFile(":::invalid")).toEqual({});
+    expect(parseConfigFile("")).toEqual({});
+  });
+
+  it("优先级：Action Inputs > 配置文件 > 内置默认值", () => {
+    const fileConfig = {
+      language: "en" as const,
+      max_diff_chars: 50000,
+      custom_instructions: "From file",
+      on_update: "resolve" as const,
+    };
+
+    const resolved = resolveConfig(
+      {
+        language: "zh", // 覆盖为 zh
+        custom_instructions: "From input", // 覆盖
+      },
+      fileConfig
+    );
+
+    expect(resolved.language).toBe("zh");
+    expect(resolved.customInstructions).toBe("From input");
+    expect(resolved.maxDiffChars).toBe(50000); // 继承自 file
+    expect(resolved.maxBodyChars).toBe(60000); // 继承默认值
+    expect(resolved.onUpdate).toBe("resolve"); // 继承自 file
+  });
+
+  it("ignore_patterns 合并默认与自定义", () => {
+    const resolved = resolveConfig(
+      { ignore_patterns: "*.test.ts, temp/*" },
+      { ignore_patterns: ["*.json"] }
+    );
+    expect(resolved.ignorePatterns).toContain("pnpm-lock.yaml");
+    expect(resolved.ignorePatterns).toContain("*.test.ts");
+    expect(resolved.ignorePatterns).toContain("temp/*");
+  });
+
+  it("keep_previous_comments 向下兼容映射为 onUpdate: keep", () => {
+    const resolved = resolveConfig({ keep_previous_comments: "true" });
+    expect(resolved.onUpdate).toBe("keep");
+
+    const resolved2 = resolveConfig({}, { keep_previous_comments: true });
+    expect(resolved2.onUpdate).toBe("keep");
+  });
+});
+
+describe("shouldSkipReview 智能早退 (Issue 3)", () => {
+  it("草稿 PR 默认早退", () => {
+    const res = shouldSkipReview({ isDraft: true, skipDraft: true, lang: "zh" });
+    expect(res.skip).toBe(true);
+    expect(res.reason).toBe("跳过草稿 PR 评审");
+  });
+
+  it("skipDraft 为 false 时草稿 PR 不早退", () => {
+    const res = shouldSkipReview({ isDraft: true, skipDraft: false });
+    expect(res.skip).toBe(false);
+  });
+
+  it("识别各类 Bot 账号并早退", () => {
+    expect(
+      shouldSkipReview({
+        author: { login: "dependabot[bot]" },
+        ignoreBots: true,
+        lang: "zh",
+      }).skip
+    ).toBe(true);
+
+    expect(
+      shouldSkipReview({
+        author: { login: "renovate-bot" },
+        ignoreBots: true,
+        lang: "zh",
+      }).skip
+    ).toBe(true);
+
+    expect(
+      shouldSkipReview({
+        author: { login: "custom-user", type: "Bot" },
+        ignoreBots: true,
+        lang: "en",
+      }).reason
+    ).toBe("Skipping bot PR review (custom-user)");
+  });
+
+  it("命中 ignoreAuthors 时早退", () => {
+    const res = shouldSkipReview({
+      author: { login: "deploy-service" },
+      ignoreAuthors: ["deploy-service", "ci-runner"],
+      lang: "zh",
+    });
+    expect(res.skip).toBe(true);
+    expect(res.reason).toContain("跳过指定作者 PR 评审");
+  });
+
+  it("正常开发者 PR 不早退", () => {
+    const res = shouldSkipReview({
+      isDraft: false,
+      skipDraft: true,
+      author: { login: "octocat", type: "User" },
+      ignoreBots: true,
+      ignoreAuthors: ["other-user"],
+    });
+    expect(res.skip).toBe(false);
   });
 });
