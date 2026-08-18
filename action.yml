@@ -6,15 +6,25 @@ branding:
   color: 'purple'
 
 inputs:
+  provider:
+    description: 'LLM provider preset (e.g. deepseek, openai, zhipu, qwen, siliconflow, kimi, volcengine, anthropic, openrouter, groq, etc.). Auto-fills endpoint and model.'
+    required: false
+    default: ''
   llm_endpoint:
-    description: 'OpenAI-compatible API base URL, e.g. https://api.deepseek.com/v1'
-    required: true
+    description: 'OpenAI-compatible API base URL (optional, auto-inferred from provider/model preset, e.g. https://api.deepseek.com/v1)'
+    required: false
+    default: ''
   llm_model:
-    description: 'Model name for both the API call and the review title, e.g. deepseek-chat'
-    required: true
+    description: 'Model name (optional, auto-inferred from provider preset, e.g. deepseek-chat, gpt-4o, glm-4-flash, qwen-plus)'
+    required: false
+    default: ''
   llm_api_key:
     description: 'API key for the LLM endpoint'
     required: true
+  coding_plan:
+    description: 'Whether to include actionable coding plan / fix steps in reviews (default true)'
+    required: false
+    default: ''
   github_token:
     description: 'GitHub token with pull-requests:write. Defaults to the workflow token.'
     required: true

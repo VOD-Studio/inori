@@ -30383,9 +30383,13 @@ const core = __importStar(__nccwpck_require__(6966));
 // INPUT_* 环境变量（即使 workflow 未显式传参），因此这里约定：
 // 可选 input 在 action.yml 中不设 default，runner 注入空串，
 // 空串一律视为「未设置」，让配置文件与 DEFAULTS 有机会生效。
-/** 读取全部评审相关 inputs（必填的 llm_* 与 github_token 不在此列） */
+/** 读取全部评审相关 inputs（必填的 llm_api_key 与 github_token 在调用点读取） */
 function readActionInputs() {
     return {
+        provider: core.getInput("provider"),
+        llm_endpoint: core.getInput("llm_endpoint"),
+        llm_model: core.getInput("llm_model"),
+        coding_plan: core.getInput("coding_plan"),
         language: core.getInput("language"),
         ignore_patterns: core.getInput("ignore_patterns"),
         custom_instructions: core.getInput("custom_instructions"),
@@ -30414,6 +30418,10 @@ exports.DEFAULTS = void 0;
 // 默认值只在这里定义，README 与 action.yml description 照此同步。
 // 新增配置项：types.ts 加字段 → 此处加默认值 → resolve.ts 加一行合并。
 exports.DEFAULTS = {
+    provider: "deepseek",
+    llmEndpoint: "https://api.deepseek.com/v1",
+    llmModel: "deepseek-chat",
+    codingPlan: true,
     language: "zh",
     maxDiffChars: 40000,
     maxBodyChars: 60000,
@@ -30543,6 +30551,7 @@ exports.resolveConfig = resolveConfig;
 const yaml_1 = __importDefault(__nccwpck_require__(84));
 const defaults_1 = __nccwpck_require__(7755);
 const diff_1 = __nccwpck_require__(353);
+const providers_1 = __nccwpck_require__(7220);
 const types_1 = __nccwpck_require__(2656);
 // ── 配置文件解析与三层合并 ──
 // 优先级：Action Inputs（显式传入）> 配置文件 > DEFAULTS。
@@ -30619,20 +30628,31 @@ function listField(raw, file) {
 }
 /**
  * 合并三层配置为最终生效值。
- * 规则见文件头注释；onUpdate 额外兼容 legacy 开关 keep_previous_comments
- * （仅在 on_update 未显式给出时生效）。
+ * 包含模型与 Provider 自动推断、Coding Plan 模式判断及三层配置优先级合并。
  */
 function resolveConfig(inputs, fileConfig = {}) {
-    // language
+    // 1. Coding Plan 开关
+    const codingPlan = boolField(inputs.coding_plan, fileConfig.coding_plan, defaults_1.DEFAULTS.codingPlan);
+    // 2. Provider / Endpoint / Model 解析与自动推断
+    const rawProvider = strField(inputs.provider, fileConfig.provider, "");
+    const rawEndpoint = strField(inputs.llm_endpoint, fileConfig.llm_endpoint, "");
+    const rawModel = strField(inputs.llm_model, fileConfig.llm_model, "");
+    const llmResolved = (0, providers_1.resolveLlmEndpointAndModel)({
+        provider: rawProvider,
+        endpoint: rawEndpoint,
+        model: rawModel,
+        enableCodingPlan: codingPlan,
+    });
+    // 3. language
     const language = enumField(inputs.language, ["zh", "en"], fileConfig.language, defaults_1.DEFAULTS.language);
-    // ignorePatterns: 内置默认 + 用户显式追加（input 优先于文件）
+    // 4. ignorePatterns: 内置默认 + 用户显式追加（input 优先于文件）
     const extraPatterns = listField(inputs.ignore_patterns, fileConfig.ignore_patterns);
     const ignorePatterns = Array.from(new Set([...diff_1.DEFAULT_IGNORE_PATTERNS, ...extraPatterns]));
-    // customInstructions: 非空 input > 文件 > 空
+    // 5. customInstructions: 非空 input > 文件 > 空
     const customInstructions = strField(inputs.custom_instructions, fileConfig.custom_instructions, defaults_1.DEFAULTS.customInstructions);
     const maxDiffChars = intField(inputs.max_diff_chars, fileConfig.max_diff_chars, defaults_1.DEFAULTS.maxDiffChars);
     const maxBodyChars = intField(inputs.max_body_chars, fileConfig.max_body_chars, defaults_1.DEFAULTS.maxBodyChars);
-    // onUpdate: on_update 显式 > keep_previous_comments legacy > 文件 > 默认
+    // 6. onUpdate: on_update 显式 > keep_previous_comments legacy > 文件 > 默认
     let onUpdate = enumField(inputs.on_update, types_1.ON_UPDATE_VALUES, fileConfig.on_update, defaults_1.DEFAULTS.onUpdate);
     if (inputs.on_update.trim() === "") {
         const legacyInput = inputs.keep_previous_comments.trim().toLowerCase() === "true";
@@ -30644,6 +30664,11 @@ function resolveConfig(inputs, fileConfig = {}) {
     const ignoreBots = boolField(inputs.ignore_bots, fileConfig.ignore_bots, defaults_1.DEFAULTS.ignoreBots);
     const ignoreAuthors = listField(inputs.ignore_authors, fileConfig.ignore_authors);
     return {
+        provider: llmResolved.provider,
+        providerName: llmResolved.providerName,
+        llmEndpoint: llmResolved.endpoint,
+        llmModel: llmResolved.model,
+        codingPlan,
         language,
         ignorePatterns,
         customInstructions,
@@ -30855,6 +30880,7 @@ exports.I18N = {
         othersHeading: "## 其他问题",
         noIssues: "未发现明显问题",
         truncated: "（内容过长已截断）",
+        codingPlanHeading: "💡 修复计划 (Coding Plan)",
         diffTruncated: (omittedCount) => `... (由于长度超限，已略去后续 ${omittedCount} 个文件的 diff)`,
     },
     en: {
@@ -30882,6 +30908,7 @@ exports.I18N = {
         othersHeading: "## Other Issues",
         noIssues: "No significant issues found",
         truncated: "(content truncated due to length)",
+        codingPlanHeading: "💡 Coding Plan (Fix Suggestion)",
         diffTruncated: (omittedCount) => `... (due to length limit, diffs of ${omittedCount} subsequent files omitted)`,
     },
 };
@@ -30901,15 +30928,22 @@ function t(lang) {
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.buildPrompt = buildPrompt;
 const i18n_1 = __nccwpck_require__(618);
-/** 构造评审 prompt：系统角色 + JSON 格式约束 + 可选自定义规则 + diff 数据 */
-function buildPrompt(diff, lang, customInstructions = "") {
+/** 构造评审 prompt：系统角色 + JSON 格式约束 + Coding Plan 引导 + 可选自定义规则 + diff 数据 */
+function buildPrompt(diff, lang, customInstructions = "", enableCodingPlan = true) {
     const table = (0, i18n_1.t)(lang);
+    const planFmt = enableCodingPlan
+        ? `, "coding_plan": "concise fix steps and code snippet"`
+        : "";
+    const planRule = enableCodingPlan
+        ? "Include an actionable coding_plan with concrete steps/code whenever a fix exists.\n"
+        : "";
     const fmt = `{"summary": "one-sentence overall conclusion", ` +
         `"reviews": [{"path": "relative file path", ` +
         `"line": added line number, "severity": "${table.severities}", ` +
-        `"comment": "issue and suggestion"}]}\n`;
+        `"comment": "issue description"${planFmt}}]}\n`;
     const rules = "line must be the target-file line number of a + added line in the diff; " +
         "omit line when unsure.\n" +
+        planRule +
         "If there are no issues, reviews is an empty array.\n";
     const custom = customInstructions.trim()
         ? `\n${table.customIntro}\n${customInstructions.trim()}\n`
@@ -30952,7 +30986,7 @@ function extractJson(content) {
  * 解析模型 JSON 输出。
  * inline 锚点行号必须落在对应文件 patch 的新增行上，否则降级到 body 清单。
  */
-function parseReviews(content, fileLines) {
+function parseReviews(content, fileLines, lang = "zh") {
     let parsed;
     try {
         parsed = JSON.parse(extractJson(content));
@@ -30971,7 +31005,16 @@ function parseReviews(content, fileLines) {
         if (!comment)
             continue;
         const severity = r.severity ?? "";
-        const text = severity ? `**[${severity}]** ${comment}` : comment;
+        let text = severity ? `**[${severity}]** ${comment}` : comment;
+        if (r.coding_plan && r.coding_plan.trim()) {
+            const heading = (0, i18n_1.t)(lang).codingPlanHeading;
+            const planBlock = r.coding_plan
+                .trim()
+                .split("\n")
+                .map((line) => `> ${line}`)
+                .join("\n");
+            text += `\n\n> **${heading}**\n${planBlock}`;
+        }
         const line = r.line;
         const path = r.path ?? "";
         if (line && path && fileLines.has(path) && fileLines.get(path).has(line)) {
@@ -31495,7 +31538,7 @@ async function main() {
         core.info(skipCheck.reason ?? "跳过评审");
         return;
     }
-    const settings = (0, llm_1.readLlmSettings)();
+    const settings = (0, llm_1.readLlmSettings)(config);
     const token = core.getInput("github_token", { required: true });
     const octokit = github.getOctokit(token);
     const repo = { owner: ctx.repo.owner, repo: ctx.repo.repo };
@@ -31504,9 +31547,10 @@ async function main() {
         core.info("无有效代码变更需评审");
         return;
     }
-    core.info(`评审 ${repo.owner}/${repo.repo} PR #${pr.number}，diff ${diff.length} 字符，模型 ${settings.model}`);
+    const providerLabel = config.providerName ? ` [${config.providerName}]` : "";
+    core.info(`评审 ${repo.owner}/${repo.repo} PR #${pr.number}，diff ${diff.length} 字符，模型 ${settings.model}${providerLabel}，端点 ${settings.endpoint}`);
     const content = await (0, llm_1.callLlm)(diff, config, settings);
-    const { summary, inlines, bodyItems } = (0, review_1.parseReviews)(content, fileLines);
+    const { summary, inlines, bodyItems } = (0, review_1.parseReviews)(content, fileLines, config.language);
     // 空结果也发布「未发现问题」并替换/更新旧评审，避免上一轮的意见残留误导
     const body = (0, review_1.buildReviewBody)({ summary, bodyItems, model: settings.model }, config.language, config.maxBodyChars);
     await (0, github_1.postReview)(octokit, repo, pr.number, pr.head.sha, body, inlines, config.onUpdate);
@@ -31563,12 +31607,34 @@ exports.callLlm = callLlm;
 const core = __importStar(__nccwpck_require__(6966));
 const prompt_1 = __nccwpck_require__(9080);
 const errors_1 = __nccwpck_require__(3113);
-/** 读取必填的 LLM action inputs 与内置调用参数 */
-function readLlmSettings() {
+/** 异步等待毫秒数，遵循 Promise.withResolvers 规范 */
+function delay(ms) {
+    const { promise, resolve } = Promise.withResolvers();
+    setTimeout(resolve, ms);
+    return promise;
+}
+/**
+ * 根据已解析配置（含自动推断与自定义）与环境密钥构造 LLM 调用设置
+ */
+function readLlmSettings(config) {
+    // 优先从 llm_api_key 读取，若为空可从常见环境变量兜底
+    let apiKey = core.getInput("llm_api_key");
+    if (!apiKey) {
+        apiKey =
+            process.env.LLM_API_KEY ||
+                process.env.OPENAI_API_KEY ||
+                process.env.DEEPSEEK_API_KEY ||
+                process.env.ZHIPU_API_KEY ||
+                process.env.DASHSCOPE_API_KEY ||
+                "";
+    }
+    if (!apiKey) {
+        throw new Error("缺少 LLM API Key：请在 Action with 中配置 llm_api_key 或设置 secrets/环境变量");
+    }
     return {
-        endpoint: core.getInput("llm_endpoint", { required: true }).replace(/\/+$/, ""),
-        model: core.getInput("llm_model", { required: true }),
-        apiKey: core.getInput("llm_api_key", { required: true }),
+        endpoint: config.llmEndpoint.replace(/\/+$/, ""),
+        model: config.llmModel,
+        apiKey,
         timeoutMs: 300_000,
         maxRetries: 3,
     };
@@ -31597,11 +31663,12 @@ async function chatCompletions(settings, body) {
 }
 /**
  * 调用 LLM 产出评审内容：
+ * - 结合 Coding Plan 约束构造 Prompt；
  * - 部分兼容端点不支持 response_format（通常报 400），自动去掉该参数重试一次；
  * - 429/5xx/超时/网络错误按指数退避重试，最多 maxRetries 次。
  */
 async function callLlm(diff, config, settings) {
-    const prompt = (0, prompt_1.buildPrompt)(diff, config.language, config.customInstructions);
+    const prompt = (0, prompt_1.buildPrompt)(diff, config.language, config.customInstructions, config.codingPlan);
     const body = {
         model: settings.model,
         messages: [{ role: "user", content: prompt }],
@@ -31626,9 +31693,338 @@ async function callLlm(diff, config, settings) {
                 throw e;
             const delayMs = 1000 * 2 ** attempt;
             core.warning(`LLM 调用失败：${e instanceof Error ? e.message : String(e)}，${delayMs / 1000}s 后重试（${attempt}/${settings.maxRetries}）`);
-            await new Promise((resolve) => setTimeout(resolve, delayMs));
+            await delay(delayMs);
         }
     }
+}
+
+
+/***/ }),
+
+/***/ 7220:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+// ── 大模型提供商预设与自动推断引擎 ──
+// 内置主流全球与国内提供商预设、Coding Plan 专用端点与模型推荐，
+// 支持通过 provider 名称、别名或模型名前缀自动补全 endpoint 与推荐模型，
+// 同时 100% 支持用户自定义 endpoint 与 model。
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.PROVIDER_PRESETS = void 0;
+exports.findProvider = findProvider;
+exports.detectProviderByModel = detectProviderByModel;
+exports.resolveLlmEndpointAndModel = resolveLlmEndpointAndModel;
+exports.PROVIDER_PRESETS = [
+    // ── 1. DeepSeek ──
+    {
+        id: "deepseek",
+        name: "DeepSeek",
+        defaultEndpoint: "https://api.deepseek.com/v1",
+        defaultModel: "deepseek-chat",
+        codingPlanModel: "deepseek-chat",
+        aliases: ["deepseek-ai", "deep-seek"],
+        modelPatterns: [/^deepseek-(chat|reasoner|coder|v\d)/i, /^deepseek$/i],
+    },
+    // ── 2. OpenAI ──
+    {
+        id: "openai",
+        name: "OpenAI",
+        defaultEndpoint: "https://api.openai.com/v1",
+        defaultModel: "gpt-4o-mini",
+        codingPlanModel: "gpt-4o",
+        aliases: ["chatgpt"],
+        modelPatterns: [/^(gpt-|o1|o3|chatgpt)/i],
+    },
+    // ── 3. 智谱 AI (Zhipu / BigModel / GLM / CodeGeeX / Coding Plan) ──
+    {
+        id: "zhipu",
+        name: "智谱 AI (GLM / CodeGeeX)",
+        defaultEndpoint: "https://open.bigmodel.cn/api/paas/v4",
+        defaultModel: "glm-4-flash",
+        codingPlanModel: "codegeex-4",
+        aliases: ["bigmodel", "zhipuai", "glm", "codegeex"],
+        modelPatterns: [/^(glm-|codegeex)/i],
+    },
+    // ── 4. 阿里云百炼 / 通义千问 (DashScope / Qwen / Coding Plan) ──
+    {
+        id: "dashscope",
+        name: "阿里云百炼 (通义千问 / Qwen)",
+        defaultEndpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        defaultModel: "qwen-plus",
+        codingPlanModel: "qwen-coder-plus",
+        aliases: ["qwen", "aliyun", "tongyi", "alibaba", "bailian"],
+        modelPatterns: [/^(qwen-|qwen2\.|qwen2\.5-|tongyi)/i],
+    },
+    // ── 5. 硅基流动 (SiliconFlow) ──
+    {
+        id: "siliconflow",
+        name: "硅基流动 (SiliconFlow)",
+        defaultEndpoint: "https://api.siliconflow.cn/v1",
+        defaultModel: "deepseek-ai/DeepSeek-V3",
+        codingPlanModel: "Qwen/Qwen2.5-Coder-32B-Instruct",
+        aliases: ["silicon", "silicon-flow"],
+        modelPatterns: [/^deepseek-ai\//i, /^Qwen\/Qwen2\.5-Coder/i, /^internlm\//i, /^Pro\/deepseek/i],
+    },
+    // ── 6. Moonshot AI (Kimi) ──
+    {
+        id: "moonshot",
+        name: "Moonshot AI (Kimi)",
+        defaultEndpoint: "https://api.moonshot.cn/v1",
+        defaultModel: "moonshot-v1-8k",
+        codingPlanModel: "moonshot-v1-32k",
+        aliases: ["kimi", "moonshotai"],
+        modelPatterns: [/^(moonshot|kimi)/i],
+    },
+    // ── 7. 字节跳动火山方舟 (Volcengine Ark / 豆包 Doubao) ──
+    {
+        id: "volcengine",
+        name: "字节跳动火山引擎 (豆包 / Doubao)",
+        defaultEndpoint: "https://ark.cn-beijing.volces.com/api/v3",
+        defaultModel: "doubao-pro-32k",
+        codingPlanModel: "doubao-coder-pro",
+        aliases: ["doubao", "volces", "bytedance", "huoshan"],
+        modelPatterns: [/^(doubao|ep-)/i],
+    },
+    // ── 8. MiniMax (海螺 AI / Coding Plan) ──
+    {
+        id: "minimax",
+        name: "MiniMax (海螺 AI)",
+        defaultEndpoint: "https://api.minimax.chat/v1",
+        defaultModel: "MiniMax-Text-01",
+        codingPlanModel: "MiniMax-Text-01",
+        aliases: ["hailuo", "abab"],
+        modelPatterns: [/^(minimax|abab)/i],
+    },
+    // ── 9. 百度千帆 (Baidu Qianfan / 文心一言) ──
+    {
+        id: "baidu",
+        name: "百度智能云千帆",
+        defaultEndpoint: "https://qianfan.baidubce.com/v2",
+        defaultModel: "ernie-4.0-turbo-8k",
+        codingPlanModel: "ernie-4.0-turbo-8k",
+        aliases: ["qianfan", "ernie", "wenxin"],
+        modelPatterns: [/^(ernie|eb-)/i],
+    },
+    // ── 10. 腾讯混元 (Tencent Hunyuan) ──
+    {
+        id: "tencent",
+        name: "腾讯混元 (Tencent Hunyuan)",
+        defaultEndpoint: "https://api.hunyuan.cloud.tencent.com/v1",
+        defaultModel: "hunyuan-standard",
+        codingPlanModel: "hunyuan-code",
+        aliases: ["hunyuan", "tencentcloud"],
+        modelPatterns: [/^hunyuan/i],
+    },
+    // ── 11. 零一万物 (01.AI / Yi) ──
+    {
+        id: "lingyi",
+        name: "零一万物 (01.AI / Yi)",
+        defaultEndpoint: "https://api.lingyiwanwu.com/v1",
+        defaultModel: "yi-lightning",
+        codingPlanModel: "yi-lightning",
+        aliases: ["01.ai", "yi", "lingyiwanwu"],
+        modelPatterns: [/^yi-/i],
+    },
+    // ── 12. 阶跃星辰 (StepFun) ──
+    {
+        id: "stepfun",
+        name: "阶跃星辰 (StepFun)",
+        defaultEndpoint: "https://api.stepfun.com/v1",
+        defaultModel: "step-1-8k",
+        codingPlanModel: "step-1-32k",
+        aliases: ["step", "jieyue"],
+        modelPatterns: [/^step-/i],
+    },
+    // ── 13. 百川智能 (Baichuan) ──
+    {
+        id: "baichuan",
+        name: "百川智能 (Baichuan)",
+        defaultEndpoint: "https://api.baichuan-ai.com/v1",
+        defaultModel: "Baichuan4",
+        codingPlanModel: "Baichuan4",
+        aliases: ["baichuan-ai"],
+        modelPatterns: [/^baichuan/i],
+    },
+    // ── 14. 无问芯穹 (Infinigence AI / GenStudio) ──
+    {
+        id: "infinigence",
+        name: "无问芯穹 (Infinigence AI)",
+        defaultEndpoint: "https://cloud.infini-ai.com/maas/v1",
+        defaultModel: "deepseek-v3",
+        codingPlanModel: "qwen2.5-coder-32b-instruct",
+        aliases: ["infini", "genstudio"],
+        modelPatterns: [],
+    },
+    // ── 15. Anthropic (Claude / 兼容代理) ──
+    {
+        id: "anthropic",
+        name: "Anthropic (Claude)",
+        defaultEndpoint: "https://api.anthropic.com/v1",
+        defaultModel: "claude-3-5-sonnet-20241022",
+        codingPlanModel: "claude-3-7-sonnet-20250219",
+        aliases: ["claude"],
+        modelPatterns: [/^claude/i],
+    },
+    // ── 16. OpenRouter ──
+    {
+        id: "openrouter",
+        name: "OpenRouter",
+        defaultEndpoint: "https://openrouter.ai/api/v1",
+        defaultModel: "deepseek/deepseek-chat",
+        codingPlanModel: "anthropic/claude-3.5-sonnet",
+        aliases: ["open-router"],
+        modelPatterns: [/^openrouter\//i],
+    },
+    // ── 17. Groq ──
+    {
+        id: "groq",
+        name: "Groq",
+        defaultEndpoint: "https://api.groq.com/openai/v1",
+        defaultModel: "llama-3.3-70b-versatile",
+        codingPlanModel: "llama-3.3-70b-versatile",
+        aliases: [],
+        modelPatterns: [/^(llama-|mixtral-|gemma-)/i],
+    },
+    // ── 18. GitHub Models (Azure AI) ──
+    {
+        id: "github-models",
+        name: "GitHub Models",
+        defaultEndpoint: "https://models.inference.ai.azure.com",
+        defaultModel: "gpt-4o-mini",
+        codingPlanModel: "gpt-4o",
+        aliases: ["github", "azure-models", "gh-models"],
+        modelPatterns: [],
+    },
+    // ── 19. Together AI ──
+    {
+        id: "together",
+        name: "Together AI",
+        defaultEndpoint: "https://api.together.xyz/v1",
+        defaultModel: "deepseek-ai/DeepSeek-V3",
+        codingPlanModel: "Qwen/Qwen2.5-Coder-32B-Instruct",
+        aliases: ["together-ai", "togetherai"],
+        modelPatterns: [/^meta-llama\//i, /^togethercomputer\//i],
+    },
+    // ── 20. Fireworks AI ──
+    {
+        id: "fireworks",
+        name: "Fireworks AI",
+        defaultEndpoint: "https://api.fireworks.ai/inference/v1",
+        defaultModel: "accounts/fireworks/models/deepseek-v3",
+        codingPlanModel: "accounts/fireworks/models/deepseek-v3",
+        aliases: ["fireworks-ai"],
+        modelPatterns: [/^accounts\/fireworks\//i],
+    },
+    // ── 21. Mistral AI ──
+    {
+        id: "mistral",
+        name: "Mistral AI",
+        defaultEndpoint: "https://api.mistral.ai/v1",
+        defaultModel: "codestral-latest",
+        codingPlanModel: "codestral-latest",
+        aliases: ["mistralai", "codestral"],
+        modelPatterns: [/^(mistral|codestral|pixtral)/i],
+    },
+    // ── 22. Perplexity AI ──
+    {
+        id: "perplexity",
+        name: "Perplexity",
+        defaultEndpoint: "https://api.perplexity.ai",
+        defaultModel: "sonar",
+        codingPlanModel: "sonar-pro",
+        aliases: ["pplx"],
+        modelPatterns: [/^sonar/i],
+    },
+    // ── 23. Ollama (本地 / 私有化部署) ──
+    {
+        id: "ollama",
+        name: "Ollama (Local / Self-hosted)",
+        defaultEndpoint: "http://localhost:11434/v1",
+        defaultModel: "llama3",
+        codingPlanModel: "qwen2.5-coder",
+        aliases: ["local-ollama"],
+        modelPatterns: [/^ollama\//i],
+    },
+    // ── 24. vLLM / LMStudio / 通用本地服务 ──
+    {
+        id: "local",
+        name: "Local OpenAI-Compatible Server (vLLM / LMStudio)",
+        defaultEndpoint: "http://localhost:8000/v1",
+        defaultModel: "default",
+        codingPlanModel: "default",
+        aliases: ["vllm", "lmstudio", "custom-local"],
+        modelPatterns: [],
+    },
+];
+/**
+ * 根据输入名称或别名查找匹配的 Provider 预设
+ */
+function findProvider(nameOrAlias) {
+    if (!nameOrAlias)
+        return undefined;
+    const raw = nameOrAlias.trim().toLowerCase();
+    if (!raw)
+        return undefined;
+    return exports.PROVIDER_PRESETS.find((p) => p.id === raw || (p.aliases && p.aliases.some((a) => a.toLowerCase() === raw)));
+}
+/**
+ * 根据模型名称特征模式自动推断所属 Provider 预设
+ */
+function detectProviderByModel(modelName) {
+    if (!modelName)
+        return undefined;
+    const trimmed = modelName.trim();
+    if (!trimmed)
+        return undefined;
+    for (const preset of exports.PROVIDER_PRESETS) {
+        if (preset.modelPatterns && preset.modelPatterns.some((pattern) => pattern.test(trimmed))) {
+            return preset;
+        }
+    }
+    return undefined;
+}
+/**
+ * 解析并自动补全 LLM Endpoint 与 Model 配置：
+ * 1. 显式 endpoint 优先级最高（支持完全自定义）；
+ * 2. 若指定 provider，自动使用其默认 endpoint 与模型（Coding Plan 模式下优先取 codingPlanModel）；
+ * 3. 若未指定 provider 但指定了 model，通过模型特征自动推断所属 provider 及对应 endpoint；
+ * 4. 若均未指定，默认回退到 DeepSeek 官方预设。
+ */
+function resolveLlmEndpointAndModel(input = {}) {
+    const explicitEndpoint = input.endpoint ? input.endpoint.trim().replace(/\/+$/, "") : "";
+    const explicitModel = input.model ? input.model.trim() : "";
+    const explicitProvider = input.provider ? input.provider.trim() : "";
+    const useCoding = input.enableCodingPlan ?? true;
+    // 1. 显式通过 provider 查找
+    let matchedPreset = findProvider(explicitProvider);
+    // 2. 若无 provider 但有 model，尝试通过 modelName 推断 provider
+    if (!matchedPreset && explicitModel) {
+        matchedPreset = detectProviderByModel(explicitModel);
+    }
+    // 3. 最终默认 Provider（默认 DeepSeek）
+    const fallbackPreset = exports.PROVIDER_PRESETS[0]; // deepseek
+    const effectivePreset = matchedPreset ?? fallbackPreset;
+    // 确定 endpoint
+    const endpoint = explicitEndpoint || effectivePreset.defaultEndpoint;
+    const isCustomEndpoint = Boolean(explicitEndpoint && explicitEndpoint !== effectivePreset.defaultEndpoint);
+    // 确定 model
+    let model = explicitModel;
+    if (!model) {
+        if (useCoding && effectivePreset.codingPlanModel) {
+            model = effectivePreset.codingPlanModel;
+        }
+        else {
+            model = effectivePreset.defaultModel;
+        }
+    }
+    return {
+        endpoint,
+        model,
+        provider: matchedPreset?.id,
+        providerName: matchedPreset?.name,
+        isCustomEndpoint,
+    };
 }
 
 

@@ -15,12 +15,39 @@ export interface LlmSettings {
   maxRetries: number;
 }
 
-/** 读取必填的 LLM action inputs 与内置调用参数 */
-export function readLlmSettings(): LlmSettings {
+/** 异步等待毫秒数，遵循 Promise.withResolvers 规范 */
+function delay(ms: number): Promise<void> {
+  const { promise, resolve } = Promise.withResolvers<void>();
+  setTimeout(resolve, ms);
+  return promise;
+}
+
+/**
+ * 根据已解析配置（含自动推断与自定义）与环境密钥构造 LLM 调用设置
+ */
+export function readLlmSettings(config: ResolvedConfig): LlmSettings {
+  // 优先从 llm_api_key 读取，若为空可从常见环境变量兜底
+  let apiKey = core.getInput("llm_api_key");
+  if (!apiKey) {
+    apiKey =
+      process.env.LLM_API_KEY ||
+      process.env.OPENAI_API_KEY ||
+      process.env.DEEPSEEK_API_KEY ||
+      process.env.ZHIPU_API_KEY ||
+      process.env.DASHSCOPE_API_KEY ||
+      "";
+  }
+
+  if (!apiKey) {
+    throw new Error(
+      "缺少 LLM API Key：请在 Action with 中配置 llm_api_key 或设置 secrets/环境变量"
+    );
+  }
+
   return {
-    endpoint: core.getInput("llm_endpoint", { required: true }).replace(/\/+$/, ""),
-    model: core.getInput("llm_model", { required: true }),
-    apiKey: core.getInput("llm_api_key", { required: true }),
+    endpoint: config.llmEndpoint.replace(/\/+$/, ""),
+    model: config.llmModel,
+    apiKey,
     timeoutMs: 300_000,
     maxRetries: 3,
   };
@@ -53,11 +80,12 @@ async function chatCompletions(settings: LlmSettings, body: Record<string, unkno
 
 /**
  * 调用 LLM 产出评审内容：
+ * - 结合 Coding Plan 约束构造 Prompt；
  * - 部分兼容端点不支持 response_format（通常报 400），自动去掉该参数重试一次；
  * - 429/5xx/超时/网络错误按指数退避重试，最多 maxRetries 次。
  */
 export async function callLlm(diff: string, config: ResolvedConfig, settings: LlmSettings): Promise<string> {
-  const prompt = buildPrompt(diff, config.language, config.customInstructions);
+  const prompt = buildPrompt(diff, config.language, config.customInstructions, config.codingPlan);
   const body: Record<string, unknown> = {
     model: settings.model,
     messages: [{ role: "user", content: prompt }],
@@ -83,7 +111,7 @@ export async function callLlm(diff: string, config: ResolvedConfig, settings: Ll
       core.warning(
         `LLM 调用失败：${e instanceof Error ? e.message : String(e)}，${delayMs / 1000}s 后重试（${attempt}/${settings.maxRetries}）`
       );
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      await delay(delayMs);
     }
   }
 }

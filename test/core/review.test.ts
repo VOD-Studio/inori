@@ -53,6 +53,25 @@ describe("parseReviews", () => {
     expect(r.bodyItems).toHaveLength(0);
   });
 
+
+  it("包含 coding_plan 时格式化为 Markdown 引用块", () => {
+    const json = JSON.stringify({
+      summary: "ok",
+      reviews: [
+        {
+          path: "a.ts",
+          line: 5,
+          severity: "严重",
+          comment: "未处理异常",
+          coding_plan: "1. 增加 try catch\n2. 记录错误日志",
+        },
+      ],
+    });
+    const r = parseReviews(json, fileLines, "zh");
+    expect(r.inlines[0].body).toContain("**[严重]** 未处理异常");
+    expect(r.inlines[0].body).toContain("💡 修复计划 (Coding Plan)");
+    expect(r.inlines[0].body).toContain("> 1. 增加 try catch\n> 2. 记录错误日志");
+  });
   it("非 JSON 返回原文作为 summary", () => {
     const r = parseReviews("not json", fileLines);
     expect(r.summary).toBe("not json");

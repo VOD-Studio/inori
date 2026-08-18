@@ -6,6 +6,10 @@ import type { OnUpdate } from "./types";
 // 新增配置项：types.ts 加字段 → 此处加默认值 → resolve.ts 加一行合并。
 
 export const DEFAULTS = {
+  provider: "deepseek",
+  llmEndpoint: "https://api.deepseek.com/v1",
+  llmModel: "deepseek-chat",
+  codingPlan: true,
   language: "zh",
   maxDiffChars: 40000,
   maxBodyChars: 60000,
@@ -16,6 +20,10 @@ export const DEFAULTS = {
   ignorePatterns: [] as string[],
   customInstructions: "",
 } as const satisfies {
+  provider: string;
+  llmEndpoint: string;
+  llmModel: string;
+  codingPlan: boolean;
   language: string;
   maxDiffChars: number;
   maxBodyChars: number;
