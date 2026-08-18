@@ -49,7 +49,7 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
   // ── 3. 智谱 AI (Zhipu / BigModel / GLM / CodeGeeX / Coding Plan) ──
   {
     id: "zhipu",
-    name: "智谱 AI (GLM)",
+    name: "智谱 AI",
     defaultEndpoint: "https://open.bigmodel.cn/api/paas/v4",
     defaultModel: "glm-4.7-flash",
     aliases: ["bigmodel", "zhipuai", "glm", "codegeex"],
@@ -58,7 +58,7 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
   // ── 4. 阿里云百炼 / 通义千问 (DashScope / Qwen / Coding Plan) ──
   {
     id: "dashscope",
-    name: "阿里云百炼 (通义千问 / Qwen)",
+    name: "阿里云百炼",
     defaultEndpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1",
     defaultModel: "qwen-plus",
     aliases: ["qwen", "aliyun", "tongyi", "alibaba", "bailian"],
@@ -67,7 +67,7 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
   // ── 5. 硅基流动 (SiliconFlow) ──
   {
     id: "siliconflow",
-    name: "硅基流动 (SiliconFlow)",
+    name: "SiliconFlow",
     defaultEndpoint: "https://api.siliconflow.cn/v1",
     defaultModel: "deepseek-ai/DeepSeek-V3",
     aliases: ["silicon", "silicon-flow"],
@@ -76,7 +76,7 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
   // ── 6. Moonshot AI (Kimi) ──
   {
     id: "moonshot",
-    name: "Moonshot AI (Kimi)",
+    name: "Moonshot AI",
     defaultEndpoint: "https://api.moonshot.cn/v1",
     defaultModel: "kimi-k2.6",
     aliases: ["kimi", "moonshotai"],
@@ -85,7 +85,7 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
   // ── 7. 字节跳动火山方舟 (Volcengine Ark / 豆包 Doubao) ──
   {
     id: "volcengine",
-    name: "字节跳动火山引擎 (豆包 / Doubao)",
+    name: "火山引擎",
     defaultEndpoint: "https://ark.cn-beijing.volces.com/api/v3",
     defaultModel: "doubao-seed-2-0-lite-260428",
     aliases: ["doubao", "volces", "bytedance", "huoshan"],
@@ -103,7 +103,7 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
   // ── 9. 百度千帆 (Baidu Qianfan / 文心一言) ──
   {
     id: "baidu",
-    name: "百度智能云千帆",
+    name: "百度千帆",
     defaultEndpoint: "https://qianfan.baidubce.com/v2",
     defaultModel: "ernie-4.0-turbo-8k",
     aliases: ["qianfan", "ernie", "wenxin"],
@@ -112,7 +112,7 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
   // ── 10. 腾讯混元 (Tencent Hunyuan) ──
   {
     id: "tencent",
-    name: "腾讯混元 (Tencent Hunyuan)",
+    name: "腾讯混元",
     defaultEndpoint: "https://api.hunyuan.cloud.tencent.com/v1",
     defaultModel: "hunyuan-standard",
     aliases: ["hunyuan", "tencentcloud"],
@@ -121,7 +121,7 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
   // ── 11. 零一万物 (01.AI / Yi) ──
   {
     id: "lingyi",
-    name: "零一万物 (01.AI / Yi)",
+    name: "零一万物",
     defaultEndpoint: "https://api.lingyiwanwu.com/v1",
     defaultModel: "yi-lightning",
     aliases: ["01.ai", "yi", "lingyiwanwu"],
@@ -130,7 +130,7 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
   // ── 12. 阶跃星辰 (StepFun) ──
   {
     id: "stepfun",
-    name: "阶跃星辰 (StepFun)",
+    name: "阶跃星辰",
     defaultEndpoint: "https://api.stepfun.com/v1",
     defaultModel: "step-1-8k",
     aliases: ["step", "jieyue"],
@@ -139,7 +139,7 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
   // ── 13. 百川智能 (Baichuan) ──
   {
     id: "baichuan",
-    name: "百川智能 (Baichuan)",
+    name: "百川智能",
     defaultEndpoint: "https://api.baichuan-ai.com/v1",
     defaultModel: "Baichuan4",
     aliases: ["baichuan-ai"],
@@ -148,7 +148,7 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
   // ── 14. 无问芯穹 (Infinigence AI / GenStudio) ──
   {
     id: "infinigence",
-    name: "无问芯穹 (Infinigence AI)",
+    name: "无问芯穹",
     defaultEndpoint: "https://cloud.infini-ai.com/maas/v1",
     defaultModel: "deepseek-v3",
     aliases: ["infini", "genstudio"],
@@ -157,7 +157,7 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
   // ── 15. Anthropic (Claude / 兼容代理) ──
   {
     id: "anthropic",
-    name: "Anthropic (Claude)",
+    name: "Anthropic",
     defaultEndpoint: "https://api.anthropic.com/v1",
     defaultModel: "claude-sonnet-4-20250514",
     aliases: ["claude"],
@@ -229,7 +229,7 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
   // ── 23. Ollama (本地 / 私有化部署) ──
   {
     id: "ollama",
-    name: "Ollama (Local / Self-hosted)",
+    name: "Ollama",
     defaultEndpoint: "http://localhost:11434/v1",
     defaultModel: "llama3",
     aliases: ["local-ollama"],
@@ -238,7 +238,7 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
   // ── 24. vLLM / LMStudio / 通用本地服务 ──
   {
     id: "local",
-    name: "Local OpenAI-Compatible Server (vLLM / LMStudio)",
+    name: "vLLM / LM Studio",
     defaultEndpoint: "http://localhost:8000/v1",
     defaultModel: "default",
     aliases: ["vllm", "lmstudio", "custom-local"],

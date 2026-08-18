@@ -66,7 +66,7 @@ describe("readLlmSettings API Key 查找顺序", () => {
     process.env.OPENAI_API_KEY = "openai-key";
     process.env.ZHIPU_API_KEY = "zhipu-key";
     const s = readLlmSettings(
-      minimalConfig({ provider: "zhipu", providerName: "智谱 AI (GLM / CodeGeeX)" })
+      minimalConfig({ provider: "zhipu", providerName: "智谱 AI" })
     );
     expect(s.apiKey).toBe("zhipu-key");
     delete process.env.OPENAI_API_KEY;
@@ -90,7 +90,7 @@ describe("readLlmSettings API Key 查找顺序", () => {
   it("全部缺失时抛错并提示当前 provider 的专属变量名", () => {
     expect(() =>
       readLlmSettings(
-        minimalConfig({ provider: "zhipu", providerName: "智谱 AI (GLM / CodeGeeX)" })
+        minimalConfig({ provider: "zhipu", providerName: "智谱 AI" })
       )
     ).toThrow(/ZHIPU_API_KEY/);
   });
