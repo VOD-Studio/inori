@@ -57,11 +57,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      # 未发版（release_created 为空）时跳过
       - name: Move major version tag
         if: steps.release.outputs.release_created == 'true'
         run: |
-          tag="v${{ steps.release.outputs.tag_name }}"
+          tag="${{ steps.release.outputs.tag_name }}"
           major="${tag%%.*}"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
