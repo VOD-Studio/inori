@@ -24,11 +24,25 @@ interface LlmResponse {
 export const REVIEW_MARKER = '<!-- inori-review -->'
 
 /**
+ * 剥离 reasoning 模型（MiniMax-M / DeepSeek-R1 / QwQ 等）输出中的
+ * `<think>…</think>` 思考过程，只保留正文。
+ * 兼容两种形态：正常闭合取闭合标签之后；未闭合（截断）则丢弃思考段。
+ * 无 think 标签时为恒等（仅 trim），不影响普通模型输出。
+ */
+export function stripThink(content: string): string {
+  const close = content.lastIndexOf('</think>')
+  if (close !== -1) return content.slice(close + '</think>'.length).trim()
+  const open = content.indexOf('<think>')
+  if (open !== -1) return content.slice(0, open).trim()
+  return content.trim()
+}
+
+/**
  * 从模型输出中提取 JSON 文本。模型常无视「不要代码块」的指令，
- * 先剥离 ``` 围栏，再按最外层花括号截取（容忍围栏外的说明文字）。
+ * 先剥离思考过程与 ``` 围栏，再按最外层花括号截取（容忍围栏外的说明文字）。
  */
 export function extractJson(content: string): string {
-  let s = content.trim()
+  let s = stripThink(content)
   const fenced = s.match(/^```[\w-]*\s*([\s\S]*?)\s*```$/)
   if (fenced) s = fenced[1].trim()
   const start = s.indexOf('{')
@@ -50,7 +64,8 @@ export function parseReviews(
   try {
     parsed = JSON.parse(extractJson(content)) as LlmResponse
   } catch {
-    return { summary: content, inlines: [], bodyItems: [] }
+    // 解析失败时正文兜底也必须剥思考过程，否则思维链会原样贴进 PR
+    return { summary: stripThink(content), inlines: [], bodyItems: [] }
   }
 
   const summary = parsed.summary ?? ''
