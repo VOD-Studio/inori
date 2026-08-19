@@ -6,7 +6,8 @@
 # 不构成合并门禁。
 #
 # 排除：
-#   - release-please 自动生成的 release PR（只改 CHANGELOG 与 manifest 文本）
+#   - release-please 的 release PR：通过下方 paths-ignore 在触发层排除
+#     （只改 CHANGELOG 与 manifest，不触发即不产生 Skipped 徽章）
 #   - dist 产物、锁文件与发版文本，避免噪音评论
 #
 # 首次使用前在仓库 Settings → Secrets 添加 DEEPSEEK_API_KEY
@@ -17,7 +18,14 @@ name: AI Review
 on:
   pull_request:
     types: [opened, reopened, synchronize]
-    branches: [main]
+    # 只改发版文本的 PR（release-please 的 release PR 恰好只改这三个文件）
+    # 直接不触发本 workflow——不触发 = 不产生 check run，PR checks 里不会
+    # 出现灰色 "Skipped" 徽章（job 级 if 跳过的是 Skipped，仍会显示）。
+    # 依赖更新类 PR 必然同时改 pnpm-lock.yaml（不在忽略列表），仍会评审。
+    paths-ignore:
+      - CHANGELOG.md
+      - .release-please-manifest.json
+      - package.json
 
 # 同一 PR 多次 push 时取消旧评审，避免并发产生重复评论
 concurrency:
