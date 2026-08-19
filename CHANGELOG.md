@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.4](https://github.com/VOD-Studio/inori/compare/v0.2.3...v0.2.4) (2026-08-19)
+
+
+### 修复
+
+* 剥离 reasoning 模型思维链，修复 think 泄漏进 PR 评审 ([#24](https://github.com/VOD-Studio/inori/issues/24)) ([00343b6](https://github.com/VOD-Studio/inori/commit/00343b672264506f0715e4bc3b04dc528eeb3083))
+
 ## [0.2.3](https://github.com/VOD-Studio/inori/compare/v0.2.2...v0.2.3) (2026-08-18)
 
 
