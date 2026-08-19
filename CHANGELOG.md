@@ -50,3 +50,4 @@
 * 分层架构重构 ([08399d2](https://github.com/VOD-Studio/inori/commit/08399d2e2133cd56e356123101bb5e25897a181a))
 * 删除长尾 provider 预设，聚焦主流（28 → 22） ([68ed4ef](https://github.com/VOD-Studio/inori/commit/68ed4efd1984e8637e10a8633abd70763500afee))
 * 抽离纯逻辑到 src/logic.ts 并修复 parseReviews null 崩溃 ([cdcce90](https://github.com/VOD-Studio/inori/commit/cdcce9078ebfe6e46e009966893ee17e56fd14c7))
+

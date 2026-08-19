@@ -1,6 +1,6 @@
 {
   "name": "inori",
-  "version": "0.1.0",
+  "version": "0.2.5",
   "description": "AI code review for pull requests — works with any OpenAI-compatible LLM endpoint. Posts inline comments anchored to real diff lines.",
   "main": "dist/index.js",
   "scripts": {
