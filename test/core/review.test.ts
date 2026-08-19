@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { buildReviewBody, extractJson, parseReviews, REVIEW_MARKER } from '../../src/core/review'
+import {
+  buildReviewBody,
+  extractJson,
+  parseReviews,
+  REVIEW_MARKER,
+  stripThink,
+} from '../../src/core/review'
 
 describe('parseReviews', () => {
   const fileLines = new Map([['a.ts', new Set([5, 10])]])
@@ -134,6 +140,68 @@ describe('parseReviews 围栏容错', () => {
     const r = parseReviews(content, fileLines)
     expect(r.summary).toBe(content)
     expect(r.inlines).toHaveLength(0)
+  })
+})
+
+describe('parseReviews 思维链剥离（reasoning 模型回归）', () => {
+  const fileLines = new Map([['a.ts', new Set([5])]])
+
+  // 复现 violet PR #228：MiniMax-M3 输出 <think> 内含大量代码片段与花括号，
+  // 旧实现 indexOf('{') 命中 think 内的 {，JSON.parse 失败后整段思维链贴进 PR
+  it('think 块含大量花括号时仍正确解析正文 JSON', () => {
+    const content =
+      '<think>Let me analyze this diff.\n\n' +
+      'The helper creates `Array.from({ length: previewLen }, (_, i) => ({ id: `r${i}` }))`.\n' +
+      'Original JSX was `<div className="group relative">`, now plain `<div>`.\n' +
+      'Original check: `item.repliesTotal === undefined || (item.repliesTotal ?? 0) > 0`.\n' +
+      'Logic seems equivalent. No real defects found beyond comments.\n' +
+      '</think>\n\n' +
+      '{"summary":"修复正确，命名组隔离了 hover 串扰","reviews":[{"path":"a.ts","line":5,"severity":"中等","comment":"外层 div 移除 relative 前建议确认回复块无绝对定位依赖"}]}'
+    const r = parseReviews(content, fileLines, 'zh')
+    expect(r.summary).toBe('修复正确，命名组隔离了 hover 串扰')
+    expect(r.inlines).toHaveLength(1)
+    expect(r.inlines[0].line).toBe(5)
+    expect(r.summary).not.toContain('Let me analyze')
+    expect(r.inlines[0].body).not.toContain('<think>')
+  })
+
+  it('think 与围栏叠加时逐层剥离', () => {
+    const content = '<think>reasoning {fake}</think>\n```json\n{"summary":"s"}\n```'
+    const r = parseReviews(content, fileLines)
+    expect(r.summary).toBe('s')
+  })
+
+  it('think 未闭合（输出截断）时不泄漏思考过程', () => {
+    const content = '<think>Let me analyze { more thinking'
+    const r = parseReviews(content, fileLines)
+    expect(r.summary).toBe('')
+    expect(r.inlines).toHaveLength(0)
+  })
+
+  it('非 JSON 正文解析失败时 summary 也剥掉 think', () => {
+    const r = parseReviews('<think>英文推理过程</think>\n不是 JSON 的正文', fileLines)
+    expect(r.summary).toBe('不是 JSON 的正文')
+    expect(r.summary).not.toContain('英文推理过程')
+  })
+})
+
+describe('stripThink', () => {
+  it('无 think 标签时恒等（仅 trim）', () => {
+    expect(stripThink('  hello  ')).toBe('hello')
+    expect(stripThink('{"a":1}')).toBe('{"a":1}')
+  })
+
+  it('闭合 think 取其后正文', () => {
+    expect(stripThink('<think>x</think>body')).toBe('body')
+  })
+
+  it('多个 think 块时取最后一个闭合之后（只认最终正文）', () => {
+    expect(stripThink('<think>a</think>mid<think>b</think>final')).toBe('final')
+  })
+
+  it('未闭合 think 丢弃思考段', () => {
+    expect(stripThink('prefix <think>unfinished')).toBe('prefix')
+    expect(stripThink('<think>unfinished')).toBe('')
   })
 })
 
