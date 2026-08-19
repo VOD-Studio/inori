@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.5](https://github.com/VOD-Studio/inori/compare/v0.2.4...v0.2.5) (2026-08-19)
+
+
+### 修复
+
+* 恢复被 release-please 覆盖的 package.json 并改用 node 发版策略 ([#26](https://github.com/VOD-Studio/inori/issues/26)) ([7bf7715](https://github.com/VOD-Studio/inori/commit/7bf771538e3af7bf1683c543306bac6542d808d9))
+
 ## [0.2.4](https://github.com/VOD-Studio/inori/compare/v0.2.3...v0.2.4) (2026-08-19)
 
 
