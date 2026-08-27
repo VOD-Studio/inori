@@ -148,7 +148,7 @@ Inori automatically ignores common non-reviewable files by default (no need to r
 | `llm_endpoint` | Custom OpenAI-compatible API base URL (optional, auto-inferred when omitted) | — | Auto-inferred |
 | `llm_api_key` | API key for the LLM provider | ✅ | — |
 | `coding_plan` | Whether to generate actionable fix steps and code suggestions for issues | — | `true` |
-| `github_token` | GitHub token with `pull-requests:write`. Defaults to the workflow token. | — | `${{ github.token }}` |
+| `github_token` | GitHub token with `pull-requests:write`; `resolve` additionally requires `contents:write` due to GitHub GraphQL permission mapping. Defaults to the workflow token. | — | `${{ github.token }}` |
 | `language` | Output language for review comments: `zh` \| `en` | — | `zh` |
 | `ignore_patterns` | Comma-separated globs of extra files to skip (in addition to built-in ignore rules) | — | — |
 | `paths_ignore` | Globs; when **all** changed files in a push match, the review is skipped entirely (pure CI/docs-only changes). Unlike `ignore_patterns`, which only removes files from the review context. | — | — |
@@ -172,6 +172,28 @@ Inori automatically ignores common non-reviewable files by default (no need to r
    - `resolve`: Stale Inori review threads are marked as **Resolved** via the GitHub GraphQL API, keeping a clean view while preserving audit history.
    - `keep`: Stale inline comments are left intact on the diff (the summary review is still updated in place).
 
+
+### GitHub permissions for re-review cleanup
+
+The default workflow permissions are sufficient for publishing reviews:
+
+```yaml
+permissions:
+  contents: read
+  pull-requests: write
+```
+
+`on_update: resolve` additionally calls GitHub's GraphQL `resolveReviewThread` mutation. GitHub currently rejects that mutation unless the token also has `contents: write`, even though resolving a thread changes PR conversation metadata rather than repository files:
+
+```yaml
+permissions:
+  contents: write
+  pull-requests: write
+```
+
+`contents: write` allows the workflow token to push repository contents. Use `resolve` only when retaining Resolved thread history is important. Otherwise, prefer the default `replace`, which uses the REST API to delete stale Inori comments and only needs `pull-requests: write`. Use a repository-scoped GitHub App token rather than a broad personal token when `resolve` is required. If cleanup cannot resolve a thread, Inori logs a warning and continues publishing the current review; the job can still succeed.
+
+This GitHub permission behavior is documented in [GitHub Community Discussion #204269](https://github.com/orgs/community/discussions/204269).
 ## Data privacy
 
 The PR diff is sent **as-is** to the LLM endpoint you configure. No third party beyond your chosen LLM provider sees your code. Review the data-handling practices of your provider before enabling Inori on private repositories.

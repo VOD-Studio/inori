@@ -149,7 +149,7 @@ Inori 默认自动忽略以下常见非评审文件（无需在 `ignore_patterns
 | `llm_endpoint` | 自定义 OpenAI 兼容接口 Base URL（可选，不传则自动推断） | — | 自动推断 |
 | `llm_api_key` | 大模型 API 密钥 | ✅ | — |
 | `coding_plan` | 是否在评审中生成具体的代码修复计划 (Coding Plan) 与实施步骤 | — | `true` |
-| `github_token` | 具有 `pull-requests:write` 权限的 GitHub Token | — | `${{ github.token }}` |
+| `github_token` | 具有 `pull-requests:write` 权限的 GitHub Token；使用 `resolve` 时还需要 `contents:write`（GitHub GraphQL 权限映射限制）。默认使用 Workflow Token。 | — | `${{ github.token }}` |
 | `language` | 评审意见输出语言：`zh` \| `en` | — | `zh` |
 | `ignore_patterns` | 逗号分隔的额外忽略 glob 规则（与内置规则合并） | — | — |
 | `paths_ignore` | 全部变更文件命中时**整体跳过**评审（纯 CI/文档类变更无代码语义）。与 `ignore_patterns`（仅从评审上下文剔除文件）语义正交。 | — | — |
@@ -174,6 +174,28 @@ Inori 默认自动忽略以下常见非评审文件（无需在 `ignore_patterns
    - `resolve`：通过 GitHub GraphQL API 将上一轮未回复的评审线程标记为 **Resolved**（已解决），GitHub 会折叠隐藏旧意见，保持页面清爽同时保留修复轨迹。
    - `keep`：不作处理，保留全部历史行内评论（Summary 仍在原评审上就地更新）。
 
+
+### Re-review 清理所需的 GitHub 权限
+
+默认 Workflow 权限足以发布评审：
+
+```yaml
+permissions:
+  contents: read
+  pull-requests: write
+```
+
+`on_update: resolve` 会额外调用 GitHub GraphQL 的 `resolveReviewThread` mutation。GitHub 当前会拒绝仅有 `pull-requests: write` 的 Token，必须同时授予 `contents: write`，尽管解决评审线程只修改 PR 对话元数据，不修改仓库文件：
+
+```yaml
+permissions:
+  contents: write
+  pull-requests: write
+```
+
+`contents: write` 允许 Workflow Token 向仓库推送内容。只有确实需要保留 Resolved 线程历史时才建议使用 `resolve`；否则优先使用默认的 `replace`。`replace` 通过 REST API 删除过期的 Inori 评论，只需要 `pull-requests: write`。必须使用 `resolve` 时，优先使用限定到目标仓库的 GitHub App Token，而不是权限宽泛的个人 Token。清理线程失败时，Inori 会记录 Warning 并继续发布当前评审，因此 Job 仍可能成功。
+
+该 GitHub 权限行为见 [GitHub Community Discussion #204269](https://github.com/orgs/community/discussions/204269)。
 ## 数据与隐私
 
 PR 的代码 Diff 将**直接发送**至你所配置的大模型服务商端点。除你自行指定的模型提供商外，任何第三方均无法接触你的代码。在私有仓库启用前，请确认所选模型服务商的数据与隐私条款。
