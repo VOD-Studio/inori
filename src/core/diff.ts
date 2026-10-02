@@ -1,5 +1,5 @@
 import { minimatch } from 'minimatch'
-import { type Lang, t } from './i18n'
+import type { Lang } from './i18n'
 
 // ── 默认忽略模式（常见锁文件、压缩产物、矢量图、发布清单）──
 // 与 DEFAULTS 一起构成内置默认值，用户通过 ignore_patterns 追加而非覆盖。
@@ -41,21 +41,28 @@ export function isIgnored(path: string, patterns: string[]): boolean {
  */
 export function addedLines(patch: string): Set<number> {
   const lines = new Set<number>()
-  let cur: number | null = null
+  let current = 0
+  let oldRemaining = 0
+  let newRemaining = 0
   for (const line of patch.split('\n')) {
-    const m = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/)
-    if (m) {
-      cur = parseInt(m[1], 10)
+    const hunk = line.match(/^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/)
+    if (hunk) {
+      oldRemaining = hunk[1] === undefined ? 1 : Number(hunk[1])
+      current = Number(hunk[2])
+      newRemaining = hunk[3] === undefined ? 1 : Number(hunk[3])
       continue
     }
-    // 文件头形如 "+++ b/path"（带空格），需跳过
-    if (line.startsWith('+++ ') || line.startsWith('--- ')) continue
-    if (line.startsWith('+') && cur !== null) {
-      lines.add(cur)
-      cur += 1
-    } else if (line.startsWith('-')) {
-    } else if (!line.startsWith('\\') && cur !== null) {
-      cur += 1
+    // 只在 hunk 内解析内容：+++ 和 --- 也可能是实际新增、删除的代码。
+    if (oldRemaining === 0 && newRemaining === 0) continue
+    if (line.startsWith('+') && newRemaining > 0) {
+      lines.add(current++)
+      newRemaining--
+    } else if (line.startsWith('-') && oldRemaining > 0) {
+      oldRemaining--
+    } else if (line.startsWith(' ') && oldRemaining > 0 && newRemaining > 0) {
+      current++
+      oldRemaining--
+      newRemaining--
     }
   }
   return lines
@@ -68,56 +75,39 @@ export interface FormattedDiffResult {
   truncated: boolean
   omittedCount: number
   includedFiles: string[]
+  omittedFiles: string[]
 }
 
-/**
- * 组装 PR diff 并按文件块安全截断。
- * 每个文件以 `--- filename` 头开始，超过 maxDiffChars 时回退到上一个
- * 完整文件块边界截断（保证送入 LLM 的 patch 语法完整），并追加提示信息。
- */
+/** 超限文件整块跳过，继续尝试后续文件，避免首个大文件耗尽所有评审预算。 */
 export function formatDiffAndTruncate(
-  files: { filename: string; patch?: string }[],
+  files: PrFile[],
   maxDiffChars: number,
-  lang: Lang = 'zh',
+  _lang: Lang = 'zh',
 ): FormattedDiffResult {
-  const table = t(lang)
-  const validFiles = files.filter((f) => f.patch && f.patch.trim().length > 0)
-  if (validFiles.length === 0) {
-    return { diff: '', truncated: false, omittedCount: 0, includedFiles: [] }
-  }
-
   const chunks: string[] = []
   const includedFiles: string[] = []
-  let currentLen = 0
-  let truncated = false
-  let omittedCount = 0
+  const omittedFiles: string[] = []
+  let currentLength = 0
+  const limit = Number.isFinite(maxDiffChars) ? Math.max(0, Math.floor(maxDiffChars)) : 0
 
-  for (let i = 0; i < validFiles.length; i++) {
-    const f = validFiles[i]
-    const chunk = `--- ${f.filename}\n${f.patch}`
-    const nextLen = chunks.length === 0 ? chunk.length : currentLen + 1 + chunk.length
-
-    if (chunks.length > 0 && nextLen > maxDiffChars) {
-      truncated = true
-      omittedCount = validFiles.length - i
-      break
+  for (const file of files) {
+    if (!file.patch?.trim()) continue
+    const chunk = `--- ${file.filename}\n${file.patch}`
+    const nextLength = currentLength + (chunks.length > 0 ? 1 : 0) + chunk.length
+    if (nextLength > limit) {
+      omittedFiles.push(file.filename)
+      continue
     }
-
     chunks.push(chunk)
-    includedFiles.push(f.filename)
-    currentLen = nextLen
-
-    if (currentLen >= maxDiffChars && i < validFiles.length - 1) {
-      truncated = true
-      omittedCount = validFiles.length - (i + 1)
-      break
-    }
+    includedFiles.push(file.filename)
+    currentLength = nextLength
   }
 
-  let diff = chunks.join('\n')
-  if (truncated && omittedCount > 0) {
-    diff += `\n\n${table.diffTruncated(omittedCount)}`
+  return {
+    diff: chunks.join('\n'),
+    truncated: omittedFiles.length > 0,
+    omittedCount: omittedFiles.length,
+    includedFiles,
+    omittedFiles,
   }
-
-  return { diff, truncated, omittedCount, includedFiles }
 }

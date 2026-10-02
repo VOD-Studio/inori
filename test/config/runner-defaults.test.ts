@@ -21,6 +21,9 @@ const RUNNER_DEFAULTS: Record<string, string> = {
   INPUT_IGNORE_PATTERNS: '',
   INPUT_CUSTOM_INSTRUCTIONS: '',
   INPUT_MAX_DIFF_CHARS: '',
+  INPUT_BATCH_DIFF_CHARS: '',
+  INPUT_MAX_REQUESTS: '',
+  INPUT_REVIEW_CONCURRENCY: '',
   INPUT_MAX_BODY_CHARS: '',
   INPUT_ON_UPDATE: '',
   INPUT_KEEP_PREVIOUS_COMMENTS: '',
@@ -46,6 +49,15 @@ afterAll(() => {
 })
 
 describe('runner 注入空串 default 时,配置文件优先级成立 (Issue 5 P0 回归)', () => {
+  it('分批配置不被 runner 空默认值覆盖', () => {
+    expect(
+      resolveConfig(readActionInputs(), {
+        batch_diff_chars: 1234,
+        max_requests: 8,
+        review_concurrency: 3,
+      }),
+    ).toMatchObject({ batchDiffChars: 1234, maxRequests: 8, reviewConcurrency: 3 })
+  })
   it('getInput 读到的是注入的空串,readActionInputs 透传空串', () => {
     expect(core.getInput('language')).toBe('')
     expect(core.getInput('on_update')).toBe('')

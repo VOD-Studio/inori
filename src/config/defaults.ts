@@ -14,6 +14,9 @@ type DefaultFields = Pick<
   | 'codingPlan'
   | 'language'
   | 'maxDiffChars'
+  | 'batchDiffChars'
+  | 'maxRequests'
+  | 'reviewConcurrency'
   | 'maxBodyChars'
   | 'onUpdate'
   | 'skipDraft'
@@ -29,6 +32,9 @@ export const DEFAULTS = {
   codingPlan: true,
   language: 'zh',
   maxDiffChars: 40000,
+  batchDiffChars: 40000,
+  maxRequests: 4,
+  reviewConcurrency: 1,
   maxBodyChars: 60000,
   onUpdate: 'replace',
   skipDraft: true,

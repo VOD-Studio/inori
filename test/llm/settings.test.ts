@@ -5,7 +5,7 @@ import { readLlmSettings } from '../../src/llm'
 
 // ── readLlmSettings 的 API Key 查找顺序 ──
 // 顺序：llm_api_key input > 推断 provider 的专属环境变量 > LLM_API_KEY
-// > 默认 provider（deepseek）专属变量。不做跨 provider 乱序兜底：
+// 仅默认端点可兜底 deepseek 专属变量。不做跨 provider 乱序兜底：
 // 历史 bug：provider=zhipu 时可能拿到 OPENAI_API_KEY 去打智谱端点，必 401。
 
 const ENV_KEYS = [
@@ -59,6 +59,8 @@ describe('readLlmSettings API Key 查找顺序', () => {
     process.env.ZHIPU_API_KEY = 'from-zhipu-env'
     const s = readLlmSettings(minimalConfig({ provider: 'zhipu' }))
     expect(s.apiKey).toBe('from-input')
+    expect(s.timeoutMs).toBe(120_000)
+    expect(s.maxRetries).toBe(2)
     delete process.env.INPUT_LLM_API_KEY
     delete process.env.ZHIPU_API_KEY
   })
@@ -84,6 +86,31 @@ describe('readLlmSettings API Key 查找顺序', () => {
     const s = readLlmSettings(minimalConfig())
     expect(s.apiKey).toBe('deepseek-key')
     delete process.env.DEEPSEEK_API_KEY
+  })
+
+  it('其他 provider 缺 key 时不借用 DEEPSEEK_API_KEY', () => {
+    vi.stubEnv('DEEPSEEK_API_KEY', 'deepseek-only')
+    expect(() => readLlmSettings(minimalConfig({ provider: 'zhipu' }))).toThrow(/缺少 LLM API Key/)
+    vi.unstubAllEnvs()
+  })
+
+  it('未知自定义端点不借用 DEEPSEEK_API_KEY', () => {
+    vi.stubEnv('DEEPSEEK_API_KEY', 'deepseek-only')
+    expect(() =>
+      readLlmSettings(
+        minimalConfig({ llmEndpoint: 'https://proxy.example/v1', isCustomEndpoint: true }),
+      ),
+    ).toThrow(/缺少 LLM API Key/)
+    vi.unstubAllEnvs()
+  })
+
+  it('选中的 key 注册日志脱敏', () => {
+    vi.stubEnv('LLM_API_KEY', 'masked-key')
+    const mask = vi.spyOn(core, 'setSecret').mockImplementation(() => {})
+    readLlmSettings(minimalConfig())
+    expect(mask).toHaveBeenCalledWith('masked-key')
+    mask.mockRestore()
+    vi.unstubAllEnvs()
   })
 
   it('全部缺失时抛错并提示当前 provider 的专属变量名', () => {

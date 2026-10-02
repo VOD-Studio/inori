@@ -22,6 +22,9 @@ export interface ActionInputs {
   ignore_commit_prefixes: string
   custom_instructions: string
   max_diff_chars: string
+  batch_diff_chars: string
+  max_requests: string
+  review_concurrency: string
   max_body_chars: string
   on_update: string
   keep_previous_comments: string
@@ -42,6 +45,9 @@ export interface InoriConfig {
   ignore_commit_prefixes?: string[] | string
   custom_instructions?: string
   max_diff_chars?: number
+  batch_diff_chars?: number
+  max_requests?: number
+  review_concurrency?: number
   max_body_chars?: number
   on_update?: OnUpdate
   keep_previous_comments?: boolean
@@ -70,6 +76,9 @@ export interface ResolvedConfig {
   ignoreCommitPrefixes: string[]
   customInstructions: string
   maxDiffChars: number
+  batchDiffChars: number
+  maxRequests: number
+  reviewConcurrency: number
   maxBodyChars: number
   onUpdate: OnUpdate
   skipDraft: boolean

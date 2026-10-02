@@ -8,15 +8,95 @@ import { ON_UPDATE_VALUES } from './types'
 // ── 配置文件解析与三层合并 ──
 // 优先级：Action Inputs（显式传入）> 配置文件 > DEFAULTS。
 
-/** 解析 YAML 配置文件内容；非法内容容错返回空对象 */
-export function parseConfigFile(content: string): InoriConfig {
-  try {
-    const parsed = YAML.parse(content)
-    if (!parsed || typeof parsed !== 'object') return {}
-    return parsed as InoriConfig
-  } catch {
-    return {}
+const STRING_FIELDS = ['provider', 'llm_endpoint', 'llm_model', 'custom_instructions'] as const
+const BOOLEAN_FIELDS = [
+  'coding_plan',
+  'keep_previous_comments',
+  'skip_draft',
+  'ignore_bots',
+] as const
+const LIST_FIELDS = [
+  'ignore_patterns',
+  'paths_ignore',
+  'ignore_commit_prefixes',
+  'ignore_authors',
+] as const
+const INTEGER_FIELDS = [
+  'max_diff_chars',
+  'batch_diff_chars',
+  'max_requests',
+  'review_concurrency',
+  'max_body_chars',
+] as const
+
+function validateFileConfig(value: unknown): asserts value is InoriConfig {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Repository configuration must be a YAML object')
   }
+  const config = value as Record<string, unknown>
+  for (const key of STRING_FIELDS) {
+    if (config[key] !== undefined && typeof config[key] !== 'string') {
+      throw new Error(`Invalid configuration: ${key} must be a string`)
+    }
+  }
+  for (const key of BOOLEAN_FIELDS) {
+    if (config[key] !== undefined && typeof config[key] !== 'boolean') {
+      throw new Error(`Invalid configuration: ${key} must be a boolean`)
+    }
+  }
+  for (const key of LIST_FIELDS) {
+    const item = config[key]
+    if (
+      item !== undefined &&
+      typeof item !== 'string' &&
+      !(Array.isArray(item) && item.every((entry) => typeof entry === 'string'))
+    ) {
+      throw new Error(`Invalid configuration: ${key} must be a string or string array`)
+    }
+  }
+  for (const key of INTEGER_FIELDS) {
+    const item = config[key]
+    if (
+      item !== undefined &&
+      (typeof item !== 'number' || !Number.isSafeInteger(item) || item <= 0)
+    ) {
+      throw new Error(`Invalid configuration: ${key} must be a positive integer`)
+    }
+  }
+  for (const [key, allowed] of [
+    ['language', ['zh', 'en']],
+    ['on_update', ON_UPDATE_VALUES],
+  ] as const) {
+    const item = config[key]
+    if (
+      item !== undefined &&
+      (typeof item !== 'string' || !(allowed as readonly string[]).includes(item))
+    ) {
+      throw new Error(`Invalid configuration: ${key}`)
+    }
+  }
+  if (typeof config.max_body_chars === 'number' && config.max_body_chars > 65536) {
+    throw new Error('Invalid configuration: max_body_chars must not exceed 65536')
+  }
+  if (typeof config.review_concurrency === 'number' && config.review_concurrency > 3) {
+    throw new Error('Invalid configuration: review_concurrency must not exceed 3')
+  }
+}
+
+export function parseConfigFile(content: string): InoriConfig {
+  let parsed: unknown
+  try {
+    parsed = YAML.parse(content)
+  } catch {
+    throw new Error('Repository configuration contains invalid YAML')
+  }
+  if (
+    parsed === null &&
+    content.split('\n').every((line) => !line.trim() || line.trim().startsWith('#'))
+  )
+    return {}
+  validateFileConfig(parsed)
+  return parsed
 }
 
 /** 字符串或数组统一拆为去空白后的非空列表 */
@@ -38,25 +118,27 @@ function strField(raw: string, file: string | undefined, def: string): string {
   return raw.trim() !== '' ? raw : (file ?? def)
 }
 
-/** input 恒为字符串："true"→true，"false"→false，其余值（含空）落到文件/默认 */
+/** 非空布尔输入必须是 true 或 false。 */
 function boolField(raw: string, file: boolean | undefined, def: boolean): boolean {
   const v = raw.trim().toLowerCase()
   if (v === 'true') return true
   if (v === 'false') return false
+  if (v !== '') throw new Error('Invalid boolean input: expected true or false')
   return file ?? def
 }
 
-/** input 是可解析整数则用之，否则文件值（须为数字），再否则默认值 */
+/** 非空预算输入必须是正整数。 */
 function intField(raw: string, file: number | undefined, def: number): number {
   const v = raw.trim()
   if (v !== '') {
-    const n = parseInt(v, 10)
-    if (!Number.isNaN(n)) return n
+    const n = Number(v)
+    if (/^\d+$/.test(v) && Number.isSafeInteger(n) && n > 0) return n
+    throw new Error('Invalid budget input: expected a positive integer')
   }
   return typeof file === 'number' ? file : def
 }
 
-/** input 是合法枚举值则用之，否则文件值（归一后校验），再否则默认值 */
+/** 非空枚举输入必须是已支持的值。 */
 function enumField<T extends string>(
   raw: string,
   allowed: readonly T[],
@@ -70,6 +152,7 @@ function enumField<T extends string>(
   if (raw.trim() !== '') {
     const n = normalize(raw)
     if (n !== null) return n
+    throw new Error('Invalid enum input')
   }
   if (file !== undefined) {
     const n = normalize(String(file))
@@ -89,6 +172,11 @@ function listField(raw: string, file: string[] | string | undefined): string[] {
  * 包含模型与 Provider 自动推断、Coding Plan 模式判断及三层配置优先级合并。
  */
 export function resolveConfig(inputs: ActionInputs, fileConfig: InoriConfig = {}): ResolvedConfig {
+  validateFileConfig(fileConfig)
+  for (const [key, value] of Object.entries(inputs)) {
+    if (typeof value !== 'string') throw new Error(`Invalid action input: ${key}`)
+  }
+  boolField(inputs.keep_previous_comments, undefined, false)
   // 1. Coding Plan 开关
   const codingPlan = boolField(inputs.coding_plan, fileConfig.coding_plan, DEFAULTS.codingPlan)
 
@@ -139,6 +227,21 @@ export function resolveConfig(inputs: ActionInputs, fileConfig: InoriConfig = {}
     DEFAULTS.maxBodyChars,
   )
 
+  const batchDiffChars = intField(
+    inputs.batch_diff_chars,
+    fileConfig.batch_diff_chars,
+    DEFAULTS.batchDiffChars,
+  )
+  const maxRequests = intField(inputs.max_requests, fileConfig.max_requests, DEFAULTS.maxRequests)
+  const reviewConcurrency = intField(
+    inputs.review_concurrency,
+    fileConfig.review_concurrency,
+    DEFAULTS.reviewConcurrency,
+  )
+  if (reviewConcurrency > 3) throw new Error('review_concurrency must not exceed 3')
+
+  if (maxBodyChars > 65536) throw new Error('max_body_chars must not exceed 65536')
+
   // 6. onUpdate: on_update 显式 > keep_previous_comments legacy > 文件 > 默认
   let onUpdate = enumField(
     inputs.on_update,
@@ -169,6 +272,9 @@ export function resolveConfig(inputs: ActionInputs, fileConfig: InoriConfig = {}
     ignoreCommitPrefixes,
     customInstructions,
     maxDiffChars,
+    batchDiffChars,
+    maxRequests,
+    reviewConcurrency,
     maxBodyChars,
     onUpdate,
     skipDraft,

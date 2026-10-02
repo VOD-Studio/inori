@@ -1,15 +1,13 @@
 import { readActionInputs } from './actionInputs'
-import { loadRepoConfigFile } from './repoConfig'
 import { resolveConfig } from './resolve'
-import type { ResolvedConfig } from './types'
+import type { InoriConfig, ResolvedConfig } from './types'
 
 // ── 配置层对外唯一入口 ──
-// 调用方（index.ts）只需要 loadConfig()：背后是
-// action inputs 读取 → 仓库配置文件读取 → 三层合并。
+// 仓库配置由 GitHub 适配层从固定 base SHA 读取。
 
 /** 读取并合并全部配置（Action Inputs > .github/inori.yml > DEFAULTS） */
-export function loadConfig(): ResolvedConfig {
-  return resolveConfig(readActionInputs(), loadRepoConfigFile())
+export function loadConfig(fileConfig: InoriConfig): ResolvedConfig {
+  return resolveConfig(readActionInputs(), fileConfig)
 }
 
 export { DEFAULTS } from './defaults'
