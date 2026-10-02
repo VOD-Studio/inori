@@ -22,16 +22,17 @@ jobs:
     timeout-minutes: 10
     if: ${{ !startsWith(github.head_ref, 'release-please--') }}
     env:
-      DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+      INORI_API_KEY: ${{ secrets[vars.INORI_SECRET_NAME || (vars.INORI_PROVIDER == '' && 'DEEPSEEK_API_KEY') || ''] }}
     steps:
       - name: 检查 API key
-        if: env.DEEPSEEK_API_KEY == ''
-        run: echo "::warning::DEEPSEEK_API_KEY 未配置，AI 评审跳过。在 Settings → Secrets 添加后生效"
+        if: env.INORI_API_KEY == ''
+        run: echo "::warning::所选 API key 未配置，AI 评审跳过。请在 Settings → Secrets and variables → Actions 配置 Variables INORI_PROVIDER、INORI_MODEL、INORI_SECRET_NAME，并在 Secrets 添加对应名称的实际密钥"
 
       - name: AI 评审
-        if: env.DEEPSEEK_API_KEY != ''
+        if: env.INORI_API_KEY != ''
         uses: VOD-Studio/inori@main
         with:
-          provider: deepseek
-          llm_api_key: ${{ secrets.DEEPSEEK_API_KEY }}
+          provider: ${{ vars.INORI_PROVIDER || 'deepseek' }}
+          llm_model: ${{ vars.INORI_MODEL }}
+          llm_api_key: ${{ env.INORI_API_KEY }}
           ignore_patterns: dist/**,pnpm-lock.yaml,CHANGELOG.md,.release-please-manifest.json

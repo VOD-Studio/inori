@@ -77,6 +77,31 @@ No `actions/checkout` is needed: Inori reads the diff and base-SHA configuration
 > ⚠️ Note: provider ToS restrict plan keys to designated coding tools and prohibit automated API usage. Using them in CI review may violate the terms and risk key suspension — evaluate before use.
 > - **Custom Proxy / Self-hosted**: Explicit `llm_endpoint: https://your-gateway/v1` always takes highest precedence.
 
+## Manage provider, model, and key in Settings
+
+To switch models without editing a workflow each time, configure repository Variables and Secrets under **Settings → Secrets and variables → Actions**. Set up the following values once:
+
+| Tab | Name | Value |
+|---|---|---|
+| Variables | `INORI_PROVIDER` | Provider preset, for example `minimax-token` |
+| Variables | `INORI_MODEL` | A model ID supported by the selected provider; leave empty to use its preset default |
+| Variables | `INORI_SECRET_NAME` | The name of the corresponding secret, for example `MINIMAX_API_KEY` |
+| Secrets | `MINIMAX_API_KEY` | The actual API key for that provider and plan |
+
+Wire these values into your existing workflow:
+
+```yaml
+- uses: VOD-Studio/inori@v0
+  with:
+    provider: ${{ vars.INORI_PROVIDER }}
+    llm_model: ${{ vars.INORI_MODEL }}
+    llm_api_key: ${{ secrets[vars.INORI_SECRET_NAME] }}
+```
+
+`INORI_SECRET_NAME` stores a secret **name**, never the key itself. This example has no key fallback. When switching providers, select its matching secret name and supported model ID; updating Settings affects subsequent runs. These existing Action inputs work with the currently published `@v0`, independently of the pending reliability features described above.
+
+This repository's own `ai-review.yml` preserves the legacy `DEEPSEEK_API_KEY` only when both `INORI_PROVIDER` and `INORI_SECRET_NAME` are unset. An explicitly configured provider requires `INORI_SECRET_NAME`, including when the provider is `deepseek`. An absent selected secret skips the review with a warning; it never falls back to another provider's key.
+
 ## Supported providers
 
 All 22 presets below are verified against official docs (2026-08-18). Pass the `provider` value and Inori auto-fills the endpoint; `llm_model` is optional (defaults shown). You can also pass just `llm_model` — Inori infers the provider from the model name.

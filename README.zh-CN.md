@@ -77,6 +77,31 @@ jobs:
 > ⚠️ 注意：各平台 ToS 限制套餐 key 仅用于指定编程工具、禁止自动化 API 调用。在 CI 评审中使用可能违反条款、有封 key 风险，请自行评估。
 > - **自建代理 / 本地部署**：显式指定 `llm_endpoint: https://your-gateway/v1` 始终享有最高优先级。
 
+## 在 Settings 集中管理 provider、model 和 key
+
+如果希望切换模型时无需反复修改工作流，可在仓库的 **Settings → Secrets and variables → Actions** 中集中配置 Variables 和 Secrets。首次设置以下值：
+
+| 页签 | 名称 | 值 |
+|---|---|---|
+| Variables | `INORI_PROVIDER` | 提供商预设，例如 `minimax-token` |
+| Variables | `INORI_MODEL` | 所选提供商支持的模型 ID；留空则使用该预设的默认模型 |
+| Variables | `INORI_SECRET_NAME` | 对应 Secret 的名称，例如 `MINIMAX_API_KEY` |
+| Secrets | `MINIMAX_API_KEY` | 该提供商及套餐的实际 API key |
+
+在现有工作流中一次性接入这些值：
+
+```yaml
+- uses: VOD-Studio/inori@v0
+  with:
+    provider: ${{ vars.INORI_PROVIDER }}
+    llm_model: ${{ vars.INORI_MODEL }}
+    llm_api_key: ${{ secrets[vars.INORI_SECRET_NAME] }}
+```
+
+`INORI_SECRET_NAME` 存的是 Secret **名称**，不要存 key 本身。这个示例没有密钥兜底。切换 provider 时，同步选择匹配的 Secret 名称和受支持的模型 ID；修改 Settings 后，对后续运行生效。这些已有的 Action inputs 在当前已发布的 `@v0` 中即可使用，无需等待上文所述的可靠性功能发版。
+
+本仓库自己的 `ai-review.yml` 仅在 `INORI_PROVIDER` 和 `INORI_SECRET_NAME` 均未设置时，兼容旧的 `DEEPSEEK_API_KEY`。显式设置 provider 后必须设置 `INORI_SECRET_NAME`，即使 provider 是 `deepseek`。所选 Secret 不存在时会警告并跳过评审，不会退回其他提供商的 key。
+
 ## 支持的提供商
 
 以下 22 个预设均已对照官方文档核验（2026-08-18）。传入 `provider` 值即自动补全端点；`llm_model` 可选（默认值见下表）。也可以只传 `llm_model`，Inori 会按模型名特征自动推断提供商。
