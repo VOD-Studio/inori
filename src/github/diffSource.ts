@@ -1,5 +1,6 @@
 import * as core from '@actions/core'
 import type { ResolvedConfig } from '../config'
+import type { ReviewCoverage } from '../core/coverage'
 import { addedLines, formatDiffAndTruncate, isIgnored, type PrFile } from '../core/diff'
 import { type OctokitInstance, paginate, type RepoContext } from './paginate'
 
@@ -7,6 +8,7 @@ import { type OctokitInstance, paginate, type RepoContext } from './paginate'
 
 export interface PrDiff {
   diff: string
+  coverage: ReviewCoverage
   /** 各保留文件的新增行号集合（inline 锚点校验依据） */
   fileLines: Map<string, Set<number>>
 }
@@ -30,19 +32,25 @@ export async function listPrFiles(
  */
 export function buildDiffFromFiles(files: PrFile[], config: ResolvedConfig): PrDiff {
   const validFiles: { filename: string; patch: string }[] = []
+  const ignoredFiles: string[] = []
+  const unavailableFiles: string[] = []
   for (const f of files) {
     if (isIgnored(f.filename, config.ignorePatterns)) {
+      ignoredFiles.push(f.filename)
       core.info(`忽略 ${f.filename}`)
       continue
     }
-    if (!f.patch) continue
+    if (!f.patch?.trim()) {
+      unavailableFiles.push(f.filename)
+      continue
+    }
     validFiles.push({ filename: f.filename, patch: f.patch })
   }
 
   const result = formatDiffAndTruncate(validFiles, config.maxDiffChars, config.language)
   if (result.truncated) {
     core.info(
-      `diff 过大，已按文件块安全截断到 ${config.maxDiffChars} 字符以内（略去后续 ${result.omittedCount} 个文件）`,
+      `diff 过大，已按文件块安全截断到 ${config.maxDiffChars} 字符以内（略去 ${result.omittedCount} 个文件）`,
     )
   }
 
@@ -52,7 +60,16 @@ export function buildDiffFromFiles(files: PrFile[], config: ResolvedConfig): PrD
   for (const f of validFiles) {
     if (includedSet.has(f.filename)) fileLines.set(f.filename, addedLines(f.patch))
   }
-  return { diff: result.diff, fileLines }
+  return {
+    diff: result.diff,
+    fileLines,
+    coverage: {
+      reviewedFiles: result.includedFiles,
+      ignoredFiles,
+      omittedFiles: result.omittedFiles,
+      unavailableFiles,
+    },
+  }
 }
 
 /** 分页拉取 PR 全部 commit（取 subject 首行用于前缀跳过判定） */

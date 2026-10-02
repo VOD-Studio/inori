@@ -10,16 +10,55 @@ import {
 describe('parseReviews', () => {
   const fileLines = new Map([['a.ts', new Set([5, 10])]])
 
-  it('reviews=null 不崩溃', () => {
-    const r = parseReviews('{"summary":"s","reviews":null}', fileLines)
-    expect(r.summary).toBe('s')
-    expect(r.inlines).toHaveLength(0)
+  it.each([
+    'null',
+    '[]',
+    '[{"summary":"ok","reviews":[]}]',
+    '{}',
+    '{"summary":"s"}',
+    '{"summary":"s","reviews":null}',
+    '{"summary":"","reviews":[]}',
+    '{"summary":{},"reviews":[]}',
+  ])('拒绝缺失或无效的响应结构: %s', (content) => {
+    expect(() => parseReviews(content, fileLines)).toThrow(/LLM 评审输出/)
   })
 
-  it('非对象元素被跳过', () => {
-    const r = parseReviews('{"summary":"s","reviews":[123,"x",null]}', fileLines)
-    expect(r.inlines).toHaveLength(0)
-    expect(r.bodyItems).toHaveLength(0)
+  it.each([
+    123,
+    'x',
+    null,
+    [],
+    {},
+    { comment: '' },
+    { comment: '  ' },
+    { comment: 42 },
+    { comment: {} },
+    { comment: 'bug', path: {} },
+    { comment: 'bug', severity: 42 },
+  ])('拒绝非法条目，不把丢失的问题报告为 clean: %j', (item) => {
+    expect(() =>
+      parseReviews(JSON.stringify({ summary: 's', reviews: [item] }), fileLines),
+    ).toThrow(/LLM 评审条目 1/)
+  })
+
+  it('合法的空 reviews 表示评审完成且无发现', () => {
+    expect(parseReviews('{"summary":"已完成评审","reviews":[]}', fileLines)).toEqual({
+      summary: '已完成评审',
+      inlines: [],
+      bodyItems: [],
+    })
+  })
+
+  it('混合合法与非法条目也拒绝整次响应', () => {
+    expect(() =>
+      parseReviews(
+        JSON.stringify({
+          summary: 's',
+          reviews: [{ path: 'a.ts', line: 5, comment: 'bug' }, null],
+        }),
+        fileLines,
+      ),
+    ).toThrow(/条目 2/)
   })
 
   it('行号命中 fileLines 成为 inline', () => {
@@ -48,15 +87,6 @@ describe('parseReviews', () => {
     expect(r.inlines).toHaveLength(0)
     expect(r.bodyItems).toHaveLength(1)
     expect(r.bodyItems[0]).toBe('- bug（a.ts）')
-  })
-
-  it('comment 为空的条目被丢弃', () => {
-    const r = parseReviews(
-      '{"summary":"ok","reviews":[{"path":"a.ts","line":5,"comment":""}]}',
-      fileLines,
-    )
-    expect(r.inlines).toHaveLength(0)
-    expect(r.bodyItems).toHaveLength(0)
   })
 
   it('包含 coding_plan 时格式化为 Markdown 引用块', () => {
@@ -102,10 +132,8 @@ describe('parseReviews', () => {
     expect(r.inlines).toHaveLength(0)
     expect(r.bodyItems).toHaveLength(1)
   })
-  it('非 JSON 返回原文作为 summary', () => {
-    const r = parseReviews('not json', fileLines)
-    expect(r.summary).toBe('not json')
-    expect(r.inlines).toHaveLength(0)
+  it('非 JSON 抛出受控错误，不回显模型原文', () => {
+    expect(() => parseReviews('secret not json', fileLines)).toThrow('LLM 评审输出不是有效 JSON')
   })
 })
 
@@ -121,25 +149,25 @@ describe('parseReviews 围栏容错', () => {
   })
 
   it('无语言标记的围栏也能解析', () => {
-    const r = parseReviews('```\n{"summary":"s"}\n```', fileLines)
+    const r = parseReviews('```\n{"summary":"s","reviews":[]}\n```', fileLines)
     expect(r.summary).toBe('s')
   })
 
   it('围栏外有说明文字时提取 JSON 部分', () => {
-    const r = parseReviews('评审结果如下：\n```json\n{"summary":"s"}\n```\n以上。', fileLines)
+    const r = parseReviews(
+      '评审结果如下：\n```json\n{"summary":"s","reviews":[]}\n```\n以上。',
+      fileLines,
+    )
     expect(r.summary).toBe('s')
   })
 
   it('无围栏但前后有杂质时按花括号截取', () => {
-    const r = parseReviews('result: {"summary":"s"} (end)', fileLines)
+    const r = parseReviews('result: {"summary":"s","reviews":[]} (end)', fileLines)
     expect(r.summary).toBe('s')
   })
 
-  it('围栏内 JSON 损坏时回退原文 summary', () => {
-    const content = '```json\n{broken\n```'
-    const r = parseReviews(content, fileLines)
-    expect(r.summary).toBe(content)
-    expect(r.inlines).toHaveLength(0)
+  it('围栏内 JSON 损坏时拒绝输出', () => {
+    expect(() => parseReviews('```json\n{broken\n```', fileLines)).toThrow(/不是有效 JSON/)
   })
 })
 
@@ -166,22 +194,27 @@ describe('parseReviews 思维链剥离（reasoning 模型回归）', () => {
   })
 
   it('think 与围栏叠加时逐层剥离', () => {
-    const content = '<think>reasoning {fake}</think>\n```json\n{"summary":"s"}\n```'
+    const content = '<think>reasoning {fake}</think>\n```json\n{"summary":"s","reviews":[]}\n```'
     const r = parseReviews(content, fileLines)
     expect(r.summary).toBe('s')
   })
 
-  it('think 未闭合（输出截断）时不泄漏思考过程', () => {
-    const content = '<think>Let me analyze { more thinking'
-    const r = parseReviews(content, fileLines)
-    expect(r.summary).toBe('')
-    expect(r.inlines).toHaveLength(0)
+  it('think 未闭合（输出截断）时拒绝评审，不泄漏思考过程', () => {
+    expect(() => parseReviews('<think>secret { more thinking', fileLines)).toThrow(
+      'LLM 评审输出未完成：think 标签未闭合',
+    )
   })
 
-  it('非 JSON 正文解析失败时 summary 也剥掉 think', () => {
-    const r = parseReviews('<think>英文推理过程</think>\n不是 JSON 的正文', fileLines)
-    expect(r.summary).toBe('不是 JSON 的正文')
-    expect(r.summary).not.toContain('英文推理过程')
+  it('闭合 think 后再次出现截断块也拒绝输出', () => {
+    expect(() =>
+      parseReviews('<think>a</think>{"summary":"s","reviews":[]}<think>secret', fileLines),
+    ).toThrow(/think 标签未闭合/)
+  })
+
+  it('非 JSON 正文解析失败不回显思考或正文', () => {
+    expect(() => parseReviews('<think>secret</think>private text', fileLines)).toThrow(
+      'LLM 评审输出不是有效 JSON',
+    )
   })
 })
 
@@ -199,9 +232,9 @@ describe('stripThink', () => {
     expect(stripThink('<think>a</think>mid<think>b</think>final')).toBe('final')
   })
 
-  it('未闭合 think 丢弃思考段', () => {
-    expect(stripThink('prefix <think>unfinished')).toBe('prefix')
-    expect(stripThink('<think>unfinished')).toBe('')
+  it('未闭合 think 拒绝输出', () => {
+    expect(() => stripThink('prefix <think>unfinished')).toThrow(/未闭合/)
+    expect(() => stripThink('<think>unfinished')).toThrow(/未闭合/)
   })
 })
 
@@ -238,10 +271,23 @@ describe('buildReviewBody', () => {
     expect(body).toContain('未发现明显问题')
   })
 
-  it('截断后仍保留截断提示与标记', () => {
-    const body = buildReviewBody({ summary: 'x'.repeat(100), bodyItems: [], model: 'm' }, 'zh', 50)
-    expect(body).toContain('（内容过长已截断）')
-    expect(body.endsWith(REVIEW_MARKER)).toBe(true)
+  it('完整正文含 marker 超过配置预算时拒绝发布', () => {
+    expect(() =>
+      buildReviewBody({ summary: 'x'.repeat(100), bodyItems: [], model: 'm' }, 'zh', 50),
+    ).toThrow(/超出 max_body_chars/)
+  })
+
+  it.each(['zh', 'en'] as const)('GitHub 上限不能通过增大配置绕过: %s', (lang) => {
+    expect(() =>
+      buildReviewBody({ summary: 'x'.repeat(70000), bodyItems: [], model: 'm' }, lang, 100000),
+    ).toThrow(/GitHub 长度限制/)
+  })
+
+  it('精确预算包括隐藏 marker', () => {
+    const opts = { summary: 's', bodyItems: ['- bug'], model: 'm' }
+    const body = buildReviewBody(opts, 'zh', 60000)
+    expect(buildReviewBody(opts, 'zh', body.length)).toBe(body)
+    expect(() => buildReviewBody(opts, 'zh', body.length - 1)).toThrow(/超出 max_body_chars/)
   })
 
   it('en 文案生效', () => {

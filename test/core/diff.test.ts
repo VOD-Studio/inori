@@ -65,9 +65,20 @@ describe('addedLines', () => {
     expect(addedLines(patch)).toEqual(new Set([2, 3]))
   })
 
-  it('跳过 +++ 文件头不误计', () => {
-    const patch = '@@ -1,1 +10,2 @@\n+++ b/foo.py\n+real add'
-    expect(addedLines(patch)).toEqual(new Set([10]))
+  it('hunk 内 +++ 是真实新增内容，后续行号不偏移', () => {
+    const patch = '@@ -1,0 +10,2 @@\n+++ counter\n+real add'
+    expect(addedLines(patch)).toEqual(new Set([10, 11]))
+  })
+
+  it('完整 unified diff 的文件头不计入新增行', () => {
+    const patch =
+      'diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1,2 @@\n ctx\n+++ counter\ndiff --git a/b.ts b/b.ts\n--- a/b.ts\n+++ b/b.ts\n@@ -0,0 +1 @@\n+new file'
+    expect(addedLines(patch)).toEqual(new Set([1, 2]))
+  })
+
+  it('hunk 内 --- 删除内容不消费新行号，无换行标记不消费计数', () => {
+    const patch = '@@ -2,2 +3,2 @@\n--- counter\n\\ No newline at end of file\n+new\n ctx'
+    expect(addedLines(patch)).toEqual(new Set([3]))
   })
 
   it('多 hunk 合并行号', () => {
@@ -111,7 +122,7 @@ describe('formatDiffAndTruncate (Issue 4)', () => {
     expect(res.diff).toContain('--- b.ts\n+line 2')
   })
 
-  it('超过限制时按文件块安全截断并追加提示文案', () => {
+  it('超过限制时按文件块跳过，提示不进入 diff 预算', () => {
     const files = [
       { filename: 'a.ts', patch: '+first file patch content' },
       { filename: 'b.ts', patch: '+second file patch content' },
@@ -125,16 +136,43 @@ describe('formatDiffAndTruncate (Issue 4)', () => {
     expect(res.includedFiles).toEqual(['a.ts'])
     expect(res.diff).toContain('--- a.ts')
     expect(res.diff).not.toContain('--- b.ts')
-    expect(res.diff).toContain('... (由于长度超限，已略去后续 2 个文件的 diff)')
+    expect(res.diff).toBe(chunk1)
+    expect(res.diff.length).toBeLessThanOrEqual(chunk1.length + 5)
+    expect(res.omittedFiles).toEqual(['b.ts', 'c.ts'])
   })
 
-  it('英文提示截断文案', () => {
+  it('首个大文件跳过后仍评审可放入预算的小文件', () => {
     const files = [
-      { filename: 'a.ts', patch: '+patch a' },
-      { filename: 'b.ts', patch: '+patch b' },
+      { filename: 'big.ts', patch: '+'.repeat(1000) },
+      { filename: 'small.ts', patch: '+ok' },
     ]
-    const res = formatDiffAndTruncate(files, 15, 'en')
-    expect(res.truncated).toBe(true)
-    expect(res.diff).toContain('due to length limit, diffs of 1 subsequent files omitted')
+    const res = formatDiffAndTruncate(files, 20, 'en')
+    expect(res.includedFiles).toEqual(['small.ts'])
+    expect(res.omittedFiles).toEqual(['big.ts'])
+    expect(res.diff).toBe('--- small.ts\n+ok')
+    expect(res.diff.length).toBeLessThanOrEqual(20)
+  })
+
+  it('中间大文件被跳过后继续利用剩余预算', () => {
+    const files = [
+      { filename: 'a', patch: '+a' },
+      { filename: 'big', patch: '+'.repeat(1000) },
+      { filename: 'b', patch: '+b' },
+    ]
+    const res = formatDiffAndTruncate(files, 20)
+    expect(res.includedFiles).toEqual(['a', 'b'])
+    expect(res.omittedFiles).toEqual(['big'])
+  })
+
+  it('文件头和块间换行均纳入绝对预算', () => {
+    const files = [
+      { filename: 'a', patch: '+a' },
+      { filename: 'b', patch: '+b' },
+    ]
+    const full = '--- a\n+a\n--- b\n+b'
+    expect(formatDiffAndTruncate(files, full.length).diff).toBe(full)
+    expect(formatDiffAndTruncate(files, full.length - 1).includedFiles).toEqual(['a'])
+    expect(formatDiffAndTruncate(files, 0).diff).toBe('')
+    expect(formatDiffAndTruncate(files, 2).omittedCount).toBe(2)
   })
 })

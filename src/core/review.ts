@@ -15,25 +15,21 @@ export interface InlineComment {
   body: string
 }
 
-interface LlmResponse {
-  summary?: string
-  reviews?: ReviewItem[]
-}
-
 /** 嵌入评审 body 的隐藏标记，用于识别并清理 inori 的旧评审（多次 push 去重） */
 export const REVIEW_MARKER = '<!-- inori-review -->'
 
 /**
  * 剥离 reasoning 模型（MiniMax-M / DeepSeek-R1 / QwQ 等）输出中的
  * `<think>…</think>` 思考过程，只保留正文。
- * 兼容两种形态：正常闭合取闭合标签之后；未闭合（截断）则丢弃思考段。
+ * 未闭合的思考段意味着输出未完成，必须拒绝作为评审结果。
  * 无 think 标签时为恒等（仅 trim），不影响普通模型输出。
  */
 export function stripThink(content: string): string {
   const close = content.lastIndexOf('</think>')
+  if (content.lastIndexOf('<think>') > close) {
+    throw new Error('LLM 评审输出未完成：think 标签未闭合')
+  }
   if (close !== -1) return content.slice(close + '</think>'.length).trim()
-  const open = content.indexOf('<think>')
-  if (open !== -1) return content.slice(0, open).trim()
   return content.trim()
 }
 
@@ -45,6 +41,7 @@ export function extractJson(content: string): string {
   let s = stripThink(content)
   const fenced = s.match(/^```[\w-]*\s*([\s\S]*?)\s*```$/)
   if (fenced) s = fenced[1].trim()
+  if (s.startsWith('[') || s.startsWith('"')) return s
   const start = s.indexOf('{')
   const end = s.lastIndexOf('}')
   if (start !== -1 && end > start) s = s.slice(start, end + 1)
@@ -60,24 +57,43 @@ export function parseReviews(
   fileLines: Map<string, Set<number>>,
   lang: Lang = 'zh',
 ): { summary: string; inlines: InlineComment[]; bodyItems: string[] } {
-  let parsed: LlmResponse
+  const json = extractJson(content)
+  let parsed: unknown
   try {
-    parsed = JSON.parse(extractJson(content)) as LlmResponse
+    parsed = JSON.parse(json)
   } catch {
-    // 解析失败时正文兜底也必须剥思考过程，否则思维链会原样贴进 PR
-    return { summary: stripThink(content), inlines: [], bodyItems: [] }
+    throw new Error('LLM 评审输出不是有效 JSON')
   }
-
-  const summary = parsed.summary ?? ''
-  const rawReviews = Array.isArray(parsed.reviews) ? parsed.reviews : []
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error('LLM 评审输出必须是 JSON 对象')
+  }
+  if (!('summary' in parsed) || typeof parsed.summary !== 'string' || !parsed.summary.trim()) {
+    throw new Error('LLM 评审输出缺少非空 summary 字符串')
+  }
+  if (!('reviews' in parsed) || !Array.isArray(parsed.reviews)) {
+    throw new Error('LLM 评审输出缺少 reviews 数组')
+  }
+  const summary = parsed.summary.trim()
+  const rawReviews: unknown[] = parsed.reviews
 
   const inlines: InlineComment[] = []
   const bodyItems: string[] = []
-  for (const r of rawReviews) {
-    if (typeof r !== 'object' || r === null) continue
-    const comment = r.comment ?? ''
-    if (!comment) continue
-    const severity = r.severity ?? ''
+  for (const [index, item] of rawReviews.entries()) {
+    if (typeof item !== 'object' || item === null || Array.isArray(item)) {
+      throw new Error(`LLM 评审条目 ${index + 1} 必须是对象`)
+    }
+    const r = item as Record<string, unknown>
+    if (typeof r.comment !== 'string' || !r.comment.trim()) {
+      throw new Error(`LLM 评审条目 ${index + 1} 缺少非空 comment 字符串`)
+    }
+    if (
+      (r.path !== undefined && typeof r.path !== 'string') ||
+      (r.severity !== undefined && typeof r.severity !== 'string')
+    ) {
+      throw new Error(`LLM 评审条目 ${index + 1} 的 path 或 severity 类型无效`)
+    }
+    const comment = r.comment.trim()
+    const severity = typeof r.severity === 'string' ? r.severity : ''
     let text = severity ? `**[${severity}]** ${comment}` : comment
     if (typeof r.coding_plan === 'string' && r.coding_plan.trim()) {
       const heading = t(lang).codingPlanHeading
@@ -89,10 +105,11 @@ export function parseReviews(
       text += `\n\n> **${heading}**\n${planBlock}`
     }
     const line = r.line
-    const path = r.path ?? ''
+    const path = typeof r.path === 'string' ? r.path : ''
     if (
       typeof line === 'number' &&
-      line &&
+      Number.isInteger(line) &&
+      line > 0 &&
       path &&
       fileLines.has(path) &&
       fileLines.get(path)?.has(line)
@@ -107,7 +124,7 @@ export function parseReviews(
 
 /**
  * 组装评审 body：标题（含模型名）+ 结论 + 其他问题清单。
- * 截断发生在追加标记之前，保证标记不被截掉，下一轮才能识别清理。
+ * 超出完整正文预算时拒绝发布，避免把遗漏发现的结果报告为完整评审。
  */
 export function buildReviewBody(
   opts: { summary: string; bodyItems: string[]; model: string },
@@ -119,8 +136,10 @@ export function buildReviewBody(
   if (opts.bodyItems.length) {
     body += `\n\n${table.othersHeading}\n${opts.bodyItems.join('\n')}`
   }
-  if (body.length > maxBodyChars) {
-    body = `${body.slice(0, maxBodyChars)}\n\n${table.truncated}`
+  body += `\n\n${REVIEW_MARKER}`
+  const limit = Math.min(Math.floor(maxBodyChars), 65536)
+  if (!Number.isFinite(limit) || body.length > limit) {
+    throw new Error('评审正文超出 max_body_chars 或 GitHub 长度限制，无法完整发布')
   }
-  return `${body}\n\n${REVIEW_MARKER}`
+  return body
 }

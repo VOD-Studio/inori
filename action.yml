@@ -26,7 +26,7 @@ inputs:
     required: false
     default: ''
   github_token:
-    description: 'GitHub token with pull-requests:write. Defaults to the workflow token.'
+    description: 'GitHub token with contents:read and pull-requests:write. Defaults to the workflow token.'
     required: true
     default: ${{ github.token }}
   language:
@@ -46,11 +46,11 @@ inputs:
     required: false
     default: ''
   max_diff_chars:
-    description: 'Character limit before the diff is truncated at a file boundary (default 40000)'
+    description: 'Hard diff character budget; omit whole files that do not fit and try subsequent files (default 40000)'
     required: false
     default: ''
   max_body_chars:
-    description: 'Character limit for the review body (GitHub caps at 65536; default 60000)'
+    description: 'Hard review-body character budget; exceeding it fails and retains previous comments (maximum 65536; default 60000)'
     required: false
     default: ''
   custom_instructions:
@@ -77,6 +77,19 @@ inputs:
     description: 'Comma-separated list of PR author usernames to skip'
     required: false
     default: ''
+outputs:
+  status:
+    description: 'Run result: completed | partial | skipped | stale | failed. Completed does not mean zero findings.'
+  head_sha:
+    description: 'PR head commit SHA associated with this run'
+  findings_count:
+    description: 'Number of validated findings'
+  reviewed_files:
+    description: 'Number of files covered by a valid completed model response'
+  omitted_files:
+    description: 'Number of files omitted by budget, unavailable patches, or API limits (excluding ignored files)'
+  reason:
+    description: 'Explanation of the run status'
 runs:
   using: 'node24'
   main: 'dist/index.js'

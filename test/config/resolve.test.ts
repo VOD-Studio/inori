@@ -31,9 +31,30 @@ custom_instructions: |
     expect(config.custom_instructions).toContain('No inline styles.')
   })
 
-  it('非法 YAML 容错返回空对象', () => {
-    expect(parseConfigFile(':::invalid')).toEqual({})
+  it('空文件和注释文件可使用默认配置', () => {
     expect(parseConfigFile('')).toEqual({})
+    expect(parseConfigFile('# Repository preferences\n')).toEqual({})
+  })
+
+  it.each([
+    ':::invalid',
+    'null',
+    '[]',
+    'false',
+    'language: [',
+    'provider: 3',
+    'ignore_patterns: [null]',
+    'skip_draft: maybe',
+    'max_diff_chars: 0',
+    'max_body_chars: 65537',
+  ])('拒绝非法配置 %s', (content) => {
+    expect(() => parseConfigFile(content)).toThrow()
+  })
+
+  it('YAML 错误不暴露配置正文', () => {
+    expect(() => parseConfigFile('secret-url: [https://private.invalid')).toThrow(
+      'Repository configuration contains invalid YAML',
+    )
   })
 })
 
@@ -137,22 +158,26 @@ describe('resolveConfig 优先级：Action Inputs > 配置文件 > 内置默认�
     expect(resolved.llmModel).toBe('custom-model')
   })
 
-  it('非法 input 值回落：未知 on_update/语言/非数字上限', () => {
-    const resolved = resolveConfig(
-      inputs({ on_update: 'nonsense', language: 'fr', max_diff_chars: 'abc' }),
-      {},
-    )
-    expect(resolved.onUpdate).toBe('replace')
-    expect(resolved.language).toBe('zh')
-    expect(resolved.maxDiffChars).toBe(DEFAULTS.maxDiffChars)
+  it.each([
+    { on_update: 'nonsense' },
+    { language: 'fr' },
+    { max_diff_chars: 'abc' },
+    { max_diff_chars: '1.5' },
+    { max_diff_chars: '100x' },
+    { max_diff_chars: '0' },
+    { max_diff_chars: '-1' },
+    { max_body_chars: '65537' },
+    { coding_plan: 'yes' },
+    { keep_previous_comments: 'yes' },
+  ])('非法 inputs 不静默回落 %j', (invalid) => {
+    expect(() => resolveConfig(inputs(invalid))).toThrow()
   })
 
-  it('非法文件值回落，不阻断评审', () => {
-    const resolved = resolveConfig(inputs(), {
-      on_update: 'explode' as never,
-      max_diff_chars: 'not-a-number' as never,
-    })
-    expect(resolved.onUpdate).toBe('replace')
-    expect(resolved.maxDiffChars).toBe(DEFAULTS.maxDiffChars)
+  it('非法文件字段不因 input 覆盖而被忽略', () => {
+    expect(() =>
+      resolveConfig(inputs({ max_diff_chars: '500' }), {
+        max_diff_chars: 'not-a-number' as never,
+      }),
+    ).toThrow()
   })
 })

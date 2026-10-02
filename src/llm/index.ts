@@ -55,7 +55,7 @@ function warnCodingPlanMismatch(config: ResolvedConfig, apiKey: string): void {
 /**
  * 根据已解析配置（含自动推断与自定义）与环境密钥构造 LLM 调用设置。
  * API Key 查找顺序：llm_api_key input > 推断 provider 的专属环境变量
- * （如 ZHIPU_API_KEY）> 通用 LLM_API_KEY > 默认 provider（deepseek）专属变量。
+ * （如 ZHIPU_API_KEY）> 通用 LLM_API_KEY。默认端点才允许默认 provider 的密钥。
  * 不做跨 provider 乱序兜底，避免拿 A 家的 key 打 B 家端点。
  */
 export function readLlmSettings(config: ResolvedConfig): LlmSettings {
@@ -66,7 +66,11 @@ export function readLlmSettings(config: ResolvedConfig): LlmSettings {
   if (!apiKey) {
     apiKey = process.env.LLM_API_KEY || ''
   }
-  if (!apiKey) {
+  if (
+    !apiKey &&
+    !config.provider &&
+    config.llmEndpoint.replace(/\/+$/, '') === DEFAULT_PROVIDER.defaultEndpoint.replace(/\/+$/, '')
+  ) {
     const defaultEnvKey = PROVIDER_ENV_KEYS[DEFAULT_PROVIDER.id]
     apiKey = defaultEnvKey ? process.env[defaultEnvKey] || '' : ''
   }
@@ -74,17 +78,18 @@ export function readLlmSettings(config: ResolvedConfig): LlmSettings {
   if (!apiKey) {
     const hint = config.provider
       ? `（当前 provider: ${config.providerName ?? config.provider}，可设置 ${PROVIDER_ENV_KEYS[config.provider] ?? 'LLM_API_KEY'}）`
-      : '（可设置 LLM_API_KEY 或 DEEPSEEK_API_KEY）'
+      : '（可设置 LLM_API_KEY）'
     throw new Error(`缺少 LLM API Key：请在 Action with 中配置 llm_api_key 或设置环境变量${hint}`)
   }
 
+  core.setSecret(apiKey)
   warnCodingPlanMismatch(config, apiKey)
   return {
     endpoint: config.llmEndpoint.replace(/\/+$/, ''),
     model: config.llmModel,
     apiKey,
-    timeoutMs: 300_000,
-    maxRetries: 3,
+    timeoutMs: 120_000,
+    maxRetries: 2,
   }
 }
 
@@ -103,15 +108,37 @@ async function chatCompletions(
     signal: AbortSignal.timeout(settings.timeoutMs),
   })
   if (!resp.ok) {
-    const detail = (await resp.text()).slice(0, 200)
-    throw new LlmHttpError(resp.status, detail)
+    await resp.body?.cancel().catch(() => {})
+    throw new LlmHttpError(resp.status, '端点请求失败')
   }
-  const data = (await resp.json()) as {
-    choices?: { message?: { content?: string } }[]
+  let data: unknown
+  try {
+    data = await resp.json()
+  } catch {
+    throw new Error('LLM 响应不是有效 JSON')
   }
-  const content = data.choices?.[0]?.message?.content
-  if (!content) {
-    throw new Error(`LLM 响应结构异常: ${JSON.stringify(data).slice(0, 300)}`)
+  if (
+    typeof data !== 'object' ||
+    data === null ||
+    !('choices' in data) ||
+    !Array.isArray(data.choices)
+  ) {
+    throw new Error('LLM 响应缺少 choices 数组')
+  }
+  const choice: unknown = data.choices[0]
+  if (typeof choice !== 'object' || choice === null) {
+    throw new Error('LLM 响应缺少评审结果')
+  }
+  if ('finish_reason' in choice && choice.finish_reason !== 'stop') {
+    throw new Error('LLM 评审输出未正常完成，请检查输出限额或模型限制')
+  }
+  const message = 'message' in choice ? choice.message : undefined
+  const content =
+    typeof message === 'object' && message !== null && 'content' in message
+      ? message.content
+      : undefined
+  if (typeof content !== 'string' || !content.trim()) {
+    throw new Error('LLM 响应缺少非空 content 字符串')
   }
   return content.trim()
 }
@@ -151,7 +178,7 @@ export async function callLlm(
       if (attempt > settings.maxRetries || !isRetryableLlmError(e)) throw e
       const delayMs = 1000 * 2 ** attempt
       core.warning(
-        `LLM 调用失败：${e instanceof Error ? e.message : String(e)}，${delayMs / 1000}s 后重试（${attempt}/${settings.maxRetries}）`,
+        `LLM 调用暂时失败${e instanceof LlmHttpError ? `（HTTP ${e.status}）` : ''}，${delayMs / 1000}s 后重试（${attempt}/${settings.maxRetries}）`,
       )
       await delay(delayMs)
     }

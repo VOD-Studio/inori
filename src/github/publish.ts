@@ -2,17 +2,30 @@ import * as core from '@actions/core'
 import type { OnUpdate } from '../config'
 import { errMsg } from '../core/errors'
 import { type InlineComment, REVIEW_MARKER } from '../core/review'
-import { deleteOldInlineComments, findOldReviewId, resolveOldInlineThreads } from './history'
+import { deleteOldInlineComments, resolveOldInlineThreads, snapshotInlineComments } from './history'
 import type { OctokitInstance, RepoContext } from './paginate'
 
-// ── 评审发布 ──
+export interface PublishResult {
+  postedInlineCount: number
+  failedInlineCount: number
+}
 
-/**
- * 发布评审（更新复用模式）：GitHub REST 无法删除已提交的 review，
- * 因此汇总 body 复用同一轮评审（updateReview 原地更新）。
- * inline 评论按 onUpdate 策略处理上一轮痕迹（replace 删除 / resolve
- * 折叠 / keep 保留），再逐条发新的（每条内嵌标记供下轮识别清理）。
- */
+// Leave room for continuation labels and markers below GitHub's 65,536-character limit.
+const SUMMARY_CHUNK_SIZE = 60_000
+
+function summaryParts(body: string): string[] {
+  const parts: string[] = []
+  let offset = 0
+  do {
+    let end = Math.min(offset + SUMMARY_CHUNK_SIZE, body.length)
+    // Keep supplementary Unicode characters intact across review bodies.
+    if (end < body.length && /[\uD800-\uDBFF]/.test(body[end - 1])) end -= 1
+    parts.push(body.slice(offset, end))
+    offset = end
+  } while (offset < body.length)
+  return parts
+}
+
 export async function postReview(
   octokit: OctokitInstance,
   repo: RepoContext,
@@ -21,47 +34,17 @@ export async function postReview(
   body: string,
   inlines: InlineComment[],
   onUpdate: OnUpdate,
-): Promise<void> {
-  if (onUpdate === 'replace') {
+): Promise<PublishResult> {
+  let oldCommentIds = new Set<number>()
+  if (onUpdate !== 'keep') {
     try {
-      await deleteOldInlineComments(octokit, repo, prNumber)
+      oldCommentIds = await snapshotInlineComments(octokit, repo, prNumber)
     } catch (e) {
-      core.warning(`清理旧 inline 评论失败，继续发布：${errMsg(e)}`)
-    }
-  } else if (onUpdate === 'resolve') {
-    try {
-      await resolveOldInlineThreads(octokit, repo, prNumber)
-    } catch (e) {
-      core.warning(`解决旧 inline 评审线程失败，继续发布：${errMsg(e)}`)
+      core.warning(`读取历史 inline 评论失败，本轮保留历史：${errMsg(e)}`)
     }
   }
 
-  let posted = false
-  try {
-    const oldId = await findOldReviewId(octokit, repo, prNumber)
-    if (oldId !== null) {
-      await octokit.rest.pulls.updateReview({
-        ...repo,
-        pull_number: prNumber,
-        review_id: oldId,
-        body,
-      })
-      posted = true
-    }
-  } catch (e) {
-    core.warning(`更新旧评审失败，改为新建：${errMsg(e)}`)
-  }
-  if (!posted) {
-    await octokit.rest.pulls.createReview({
-      ...repo,
-      pull_number: prNumber,
-      body,
-      event: 'COMMENT',
-      commit_id: headSha,
-    })
-  }
-
-  // inline 逐条发布，单条失败只跳过该条；汇总 body 已覆盖整体结论
+  const failed: InlineComment[] = []
   for (const ic of inlines) {
     try {
       await octokit.rest.pulls.createReviewComment({
@@ -70,11 +53,48 @@ export async function postReview(
         body: `${ic.body}\n\n${REVIEW_MARKER}`,
         path: ic.path,
         line: ic.line,
+        side: 'RIGHT',
         commit_id: headSha,
       })
       core.info(`inline 评论: ${ic.path}:${ic.line}`)
     } catch (e) {
-      core.warning(`inline 评论失败，跳过该条：${errMsg(e)}`)
+      failed.push(ic)
+      core.warning(`inline 评论失败，将完整内容保存在汇总：${errMsg(e)}`)
     }
   }
+
+  const fallback = failed.length
+    ? `\n\n### Inline delivery incomplete / 行内评论发布不完整\n\n${failed
+        .map((ic) => `#### ${ic.path}:${ic.line}\n\n${ic.body}`)
+        .join('\n\n')}`
+    : ''
+  const parts = summaryParts(`${body}${fallback}`)
+  let actorId: number | undefined
+  for (const [index, part] of parts.entries()) {
+    const result = await octokit.rest.pulls.createReview({
+      ...repo,
+      pull_number: prNumber,
+      body: `${parts.length > 1 ? `(${index + 1}/${parts.length})\n\n` : ''}${part}\n\n${REVIEW_MARKER}`,
+      event: 'COMMENT',
+      commit_id: headSha,
+    })
+    actorId = result.data.user?.id
+  }
+
+  // A write response identifies both App and PAT authors without guessing a bot login.
+  if (onUpdate !== 'keep' && actorId === undefined) {
+    core.warning('无法确认评审发布身份，本轮保留历史 inline 评论')
+  }
+  if (failed.length === 0 && actorId !== undefined && oldCommentIds.size > 0) {
+    try {
+      if (onUpdate === 'replace') {
+        await deleteOldInlineComments(octokit, repo, prNumber, oldCommentIds, actorId)
+      } else if (onUpdate === 'resolve') {
+        await resolveOldInlineThreads(octokit, repo, prNumber, oldCommentIds, actorId)
+      }
+    } catch (e) {
+      core.warning(`清理历史 inline 评论失败，新评审已保存：${errMsg(e)}`)
+    }
+  }
+  return { postedInlineCount: inlines.length - failed.length, failedInlineCount: failed.length }
 }
