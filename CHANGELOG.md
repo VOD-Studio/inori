@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/VOD-Studio/inori/compare/v0.2.5...v0.3.0) (2026-10-02)
+
+
+### 新增
+
+* **core:** 提升 PR 评审可靠性 ([#28](https://github.com/VOD-Studio/inori/issues/28)) ([07afbac](https://github.com/VOD-Studio/inori/commit/07afbac5e60d26ae7b658fc75b911198da39fe0c))
+
 ## [0.2.5](https://github.com/VOD-Studio/inori/compare/v0.2.4...v0.2.5) (2026-08-19)
 
 
