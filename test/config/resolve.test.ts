@@ -4,6 +4,59 @@ import { parseConfigFile, resolveConfig } from '../../src/config/resolve'
 import { DEFAULT_PROVIDER } from '../../src/llm/providers'
 import { inputs } from './helpers'
 
+describe('batch configuration', () => {
+  it('preserves the default total budget and limits concurrent reviews', () => {
+    expect(resolveConfig(inputs())).toMatchObject({
+      maxDiffChars: 40000,
+      batchDiffChars: 40000,
+      maxRequests: 4,
+      reviewConcurrency: 1,
+    })
+  })
+
+  it('uses action inputs before repository batch configuration', () => {
+    const file = { batch_diff_chars: 500, max_requests: 7, review_concurrency: 3 }
+    expect(resolveConfig(inputs(), file)).toMatchObject({
+      batchDiffChars: 500,
+      maxRequests: 7,
+      reviewConcurrency: 3,
+    })
+    expect(
+      resolveConfig(
+        inputs({ batch_diff_chars: '200', max_requests: '2', review_concurrency: '1' }),
+        file,
+      ),
+    ).toMatchObject({
+      batchDiffChars: 200,
+      maxRequests: 2,
+      reviewConcurrency: 1,
+    })
+  })
+
+  it.each(['0', '-1', '1.5', '2x', 'Infinity', '9007199254740992'])(
+    'rejects invalid action integers: %s',
+    (value) => {
+      for (const key of ['batch_diff_chars', 'max_requests', 'review_concurrency']) {
+        expect(() => resolveConfig(inputs({ [key]: value }))).toThrow()
+      }
+    },
+  )
+
+  it.each(['0', '-1', '1.5', '"2"', '.inf', 'null'])(
+    'rejects invalid YAML integer values: %s',
+    (value) => {
+      for (const key of ['batch_diff_chars', 'max_requests', 'review_concurrency']) {
+        expect(() => parseConfigFile(`${key}: ${value}`)).toThrow()
+      }
+    },
+  )
+
+  it('rejects concurrency above three in both sources', () => {
+    expect(() => resolveConfig(inputs({ review_concurrency: '4' }))).toThrow()
+    expect(() => parseConfigFile('review_concurrency: 4')).toThrow()
+  })
+})
+
 describe('parseConfigFile', () => {
   it('解析有效 YAML 配置', () => {
     const yaml = `
@@ -119,6 +172,9 @@ describe('resolveConfig 优先级：Action Inputs > 配置文件 > 内置默认�
       ignoreCommitPrefixes: DEFAULTS.ignoreCommitPrefixes,
       customInstructions: DEFAULTS.customInstructions,
       maxDiffChars: DEFAULTS.maxDiffChars,
+      batchDiffChars: DEFAULTS.batchDiffChars,
+      maxRequests: DEFAULTS.maxRequests,
+      reviewConcurrency: DEFAULTS.reviewConcurrency,
       maxBodyChars: DEFAULTS.maxBodyChars,
       onUpdate: DEFAULTS.onUpdate,
       skipDraft: DEFAULTS.skipDraft,

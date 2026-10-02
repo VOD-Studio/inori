@@ -5,6 +5,8 @@ export interface ReviewCoverage {
   ignoredFiles: string[]
   omittedFiles: string[]
   unavailableFiles: string[]
+  failedFiles?: string[]
+  unstartedFiles?: string[]
 }
 
 function escapeText(value: string): string {
@@ -24,7 +26,15 @@ export function formatCoverage(
 ): string {
   const zh = lang === 'zh'
   const missing = Math.max(0, Math.floor(missingFiles))
-  const partial = coverage.omittedFiles.length + coverage.unavailableFiles.length + missing > 0
+  const failedFiles = coverage.failedFiles ?? []
+  const unstartedFiles = coverage.unstartedFiles ?? []
+  const partial =
+    coverage.omittedFiles.length +
+      coverage.unavailableFiles.length +
+      missing +
+      failedFiles.length +
+      unstartedFiles.length >
+    0
   const lines = [
     zh ? '## 评审覆盖范围' : '## Review coverage',
     `${zh ? '提交' : 'Commit'}: ${escapeText(headSha)}`,
@@ -32,6 +42,13 @@ export function formatCoverage(
       ? `已评审 ${coverage.reviewedFiles.length} 个文件；按配置忽略 ${coverage.ignoredFiles.length} 个；预算不足略过 ${coverage.omittedFiles.length} 个；无可用 patch ${coverage.unavailableFiles.length} 个；API 未返回 ${missing} 个。`
       : `Reviewed ${coverage.reviewedFiles.length} files; ignored by configuration ${coverage.ignoredFiles.length}; omitted by budget ${coverage.omittedFiles.length}; unavailable patches ${coverage.unavailableFiles.length}; missing from API ${missing}.`,
   ]
+  if (failedFiles.length || unstartedFiles.length) {
+    lines.push(
+      zh
+        ? `批次评审失败 ${failedFiles.length} 个文件；请求预算耗尽未启动 ${unstartedFiles.length} 个文件。`
+        : `Failed batch reviews: ${failedFiles.length} files; not started because the request budget was exhausted: ${unstartedFiles.length} files.`,
+    )
+  }
   if (partial) {
     lines.push(
       zh
@@ -42,6 +59,8 @@ export function formatCoverage(
   for (const [label, files] of [
     [zh ? '预算不足略过' : 'Omitted by budget', coverage.omittedFiles],
     [zh ? '无可用 patch' : 'Unavailable patches', coverage.unavailableFiles],
+    [zh ? '批次评审失败' : 'Failed batch reviews', failedFiles],
+    [zh ? '请求预算耗尽未启动' : 'Not started: request budget exhausted', unstartedFiles],
   ] as const) {
     if (!files.length) continue
     lines.push(`\n${label}:`)

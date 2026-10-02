@@ -9,6 +9,23 @@ const complete: ReviewCoverage = {
 }
 
 describe('formatCoverage', () => {
+  it.each(['zh', 'en'] as const)(
+    'separately discloses failed and unstarted batches in %s',
+    (lang) => {
+      const body = formatCoverage(
+        { ...complete, failedFiles: ['failed.ts'], unstartedFiles: ['waiting.ts'] },
+        'abc',
+        lang,
+      )
+      expect(body).toContain('failed.ts')
+      expect(body).toContain('waiting.ts')
+      expect(body).toContain(lang === 'zh' ? '批次评审失败 1' : 'Failed batch reviews: 1')
+      expect(body).toContain(
+        lang === 'zh' ? '请求预算耗尽未启动 1' : 'request budget was exhausted: 1',
+      )
+      expect(body).toContain(lang === 'zh' ? '仅覆盖部分变更' : 'covers only part')
+    },
+  )
   it('shows head and counts without labeling ignored files as incomplete', () => {
     const body = formatCoverage(complete, 'abc123', 'zh')
     expect(body).toContain('提交: abc123')

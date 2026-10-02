@@ -1,7 +1,7 @@
 import * as core from '@actions/core'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ResolvedConfig } from '../../src/config'
-import { buildDiffFromFiles } from '../../src/github/diffSource'
+import { buildDiffFromFiles, buildReviewBatchesFromFiles } from '../../src/github/diffSource'
 
 const config = { ignorePatterns: ['*.lock'], maxDiffChars: 100, language: 'zh' } as ResolvedConfig
 
@@ -40,5 +40,28 @@ describe('buildDiffFromFiles', () => {
     expect(result.diff).toBe('')
     expect(result.fileLines.size).toBe(0)
     expect(result.coverage.omittedFiles).toEqual(['a.ts'])
+  })
+})
+
+describe('buildReviewBatchesFromFiles', () => {
+  it('plans batches without counting planned files as completed reviews', () => {
+    const result = buildReviewBatchesFromFiles(
+      [
+        { filename: 'a.ts', patch: '@@ -0,0 +1 @@\n+a' },
+        { filename: 'ignored.lock' },
+        { filename: 'binary.bin' },
+        { filename: 'big.ts', patch: '+'.repeat(100) },
+        { filename: 'b.ts', patch: '@@ -0,0 +8 @@\n+b' },
+      ],
+      { ...config, maxDiffChars: 200, batchDiffChars: 35 },
+    )
+    expect(result.coverage).toEqual({
+      reviewedFiles: [],
+      ignoredFiles: ['ignored.lock'],
+      omittedFiles: ['big.ts'],
+      unavailableFiles: ['binary.bin'],
+    })
+    expect(result.batches.map((batch) => batch.includedFiles)).toEqual([['a.ts'], ['b.ts']])
+    expect(result.batches[1].fileLines.get('b.ts')).toEqual(new Set([8]))
   })
 })

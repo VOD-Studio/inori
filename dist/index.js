@@ -40897,7 +40897,7 @@ var __webpack_exports__ = {};
 "use strict";
 
 // EXTERNAL MODULE: ./node_modules/.pnpm/@actions+core@1.11.1/node_modules/@actions/core/lib/core.js
-var core = __nccwpck_require__(6966);
+var lib_core = __nccwpck_require__(6966);
 // EXTERNAL MODULE: ./node_modules/.pnpm/@actions+github@6.0.1/node_modules/@actions/github/lib/github.js
 var github = __nccwpck_require__(4903);
 ;// CONCATENATED MODULE: ./src/config/actionInputs.ts
@@ -40910,22 +40910,25 @@ var github = __nccwpck_require__(4903);
 /** 读取全部评审相关 inputs（必填的 llm_api_key 与 github_token 在调用点读取） */
 function readActionInputs() {
     return {
-        provider: core.getInput('provider'),
-        llm_endpoint: core.getInput('llm_endpoint'),
-        llm_model: core.getInput('llm_model'),
-        coding_plan: core.getInput('coding_plan'),
-        language: core.getInput('language'),
-        ignore_patterns: core.getInput('ignore_patterns'),
-        paths_ignore: core.getInput('paths_ignore'),
-        ignore_commit_prefixes: core.getInput('ignore_commit_prefixes'),
-        custom_instructions: core.getInput('custom_instructions'),
-        max_diff_chars: core.getInput('max_diff_chars'),
-        max_body_chars: core.getInput('max_body_chars'),
-        on_update: core.getInput('on_update'),
-        keep_previous_comments: core.getInput('keep_previous_comments'),
-        skip_draft: core.getInput('skip_draft'),
-        ignore_bots: core.getInput('ignore_bots'),
-        ignore_authors: core.getInput('ignore_authors'),
+        provider: lib_core.getInput('provider'),
+        llm_endpoint: lib_core.getInput('llm_endpoint'),
+        llm_model: lib_core.getInput('llm_model'),
+        coding_plan: lib_core.getInput('coding_plan'),
+        language: lib_core.getInput('language'),
+        ignore_patterns: lib_core.getInput('ignore_patterns'),
+        paths_ignore: lib_core.getInput('paths_ignore'),
+        ignore_commit_prefixes: lib_core.getInput('ignore_commit_prefixes'),
+        custom_instructions: lib_core.getInput('custom_instructions'),
+        max_diff_chars: lib_core.getInput('max_diff_chars'),
+        batch_diff_chars: lib_core.getInput('batch_diff_chars'),
+        max_requests: lib_core.getInput('max_requests'),
+        review_concurrency: lib_core.getInput('review_concurrency'),
+        max_body_chars: lib_core.getInput('max_body_chars'),
+        on_update: lib_core.getInput('on_update'),
+        keep_previous_comments: lib_core.getInput('keep_previous_comments'),
+        skip_draft: lib_core.getInput('skip_draft'),
+        ignore_bots: lib_core.getInput('ignore_bots'),
+        ignore_authors: lib_core.getInput('ignore_authors'),
     };
 }
 
@@ -42916,7 +42919,7 @@ function isIgnored(path, patterns) {
  * 解析 patch，返回新增行（+ 行）在目标文件里的行号集合。
  * 用于校验 inline 锚点合法性——评论只能落在真实存在的行上。
  */
-function addedLines(patch) {
+function diff_addedLines(patch) {
     const lines = new Set();
     let current = 0;
     let oldRemaining = 0;
@@ -42948,7 +42951,7 @@ function addedLines(patch) {
     return lines;
 }
 /** 超限文件整块跳过，继续尝试后续文件，避免首个大文件耗尽所有评审预算。 */
-function formatDiffAndTruncate(files, maxDiffChars, _lang = 'zh') {
+function diff_formatDiffAndTruncate(files, maxDiffChars, _lang = 'zh') {
     const chunks = [];
     const includedFiles = [];
     const omittedFiles = [];
@@ -43305,6 +43308,9 @@ const DEFAULTS = {
     codingPlan: true,
     language: 'zh',
     maxDiffChars: 40000,
+    batchDiffChars: 40000,
+    maxRequests: 4,
+    reviewConcurrency: 1,
     maxBodyChars: 60000,
     onUpdate: 'replace',
     skipDraft: true,
@@ -43340,7 +43346,13 @@ const LIST_FIELDS = [
     'ignore_commit_prefixes',
     'ignore_authors',
 ];
-const INTEGER_FIELDS = ['max_diff_chars', 'max_body_chars'];
+const INTEGER_FIELDS = [
+    'max_diff_chars',
+    'batch_diff_chars',
+    'max_requests',
+    'review_concurrency',
+    'max_body_chars',
+];
 function validateFileConfig(value) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
         throw new Error('Repository configuration must be a YAML object');
@@ -43383,6 +43395,9 @@ function validateFileConfig(value) {
     }
     if (typeof config.max_body_chars === 'number' && config.max_body_chars > 65536) {
         throw new Error('Invalid configuration: max_body_chars must not exceed 65536');
+    }
+    if (typeof config.review_concurrency === 'number' && config.review_concurrency > 3) {
+        throw new Error('Invalid configuration: review_concurrency must not exceed 3');
     }
 }
 function parseConfigFile(content) {
@@ -43498,6 +43513,11 @@ function resolveConfig(inputs, fileConfig = {}) {
     const customInstructions = strField(inputs.custom_instructions, fileConfig.custom_instructions, DEFAULTS.customInstructions);
     const maxDiffChars = intField(inputs.max_diff_chars, fileConfig.max_diff_chars, DEFAULTS.maxDiffChars);
     const maxBodyChars = intField(inputs.max_body_chars, fileConfig.max_body_chars, DEFAULTS.maxBodyChars);
+    const batchDiffChars = intField(inputs.batch_diff_chars, fileConfig.batch_diff_chars, DEFAULTS.batchDiffChars);
+    const maxRequests = intField(inputs.max_requests, fileConfig.max_requests, DEFAULTS.maxRequests);
+    const reviewConcurrency = intField(inputs.review_concurrency, fileConfig.review_concurrency, DEFAULTS.reviewConcurrency);
+    if (reviewConcurrency > 3)
+        throw new Error('review_concurrency must not exceed 3');
     if (maxBodyChars > 65536)
         throw new Error('max_body_chars must not exceed 65536');
     // 6. onUpdate: on_update 显式 > keep_previous_comments legacy > 文件 > 默认
@@ -43524,6 +43544,9 @@ function resolveConfig(inputs, fileConfig = {}) {
         ignoreCommitPrefixes,
         customInstructions,
         maxDiffChars,
+        batchDiffChars,
+        maxRequests,
+        reviewConcurrency,
         maxBodyChars,
         onUpdate,
         skipDraft,
@@ -43545,6 +43568,77 @@ function loadConfig(fileConfig) {
 
 
 
+;// CONCATENATED MODULE: ./src/core/batches.ts
+
+function buildDiffBatches(files, maxDiffChars, batchDiffChars) {
+    const totalLimit = Number.isFinite(maxDiffChars) ? Math.max(0, Math.floor(maxDiffChars)) : 0;
+    const batchLimit = Number.isFinite(batchDiffChars)
+        ? Math.min(totalLimit, Math.max(0, Math.floor(batchDiffChars)))
+        : 0;
+    const batches = [];
+    const omittedFiles = [];
+    let totalLength = 0;
+    for (const file of files) {
+        if (!file.patch?.trim())
+            continue;
+        const chunk = `--- ${file.filename}\n${file.patch}`;
+        let batch = batches.at(-1);
+        const fitsCurrent = batch !== undefined && batch.diff.length + 1 + chunk.length <= batchLimit;
+        // Count the separator across batch boundaries too, preserving single-request selection.
+        const addedLength = chunk.length + (batches.length > 0 ? 1 : 0);
+        if (chunk.length > batchLimit || totalLength + addedLength > totalLimit) {
+            omittedFiles.push(file.filename);
+            continue;
+        }
+        if (!fitsCurrent || batch === undefined) {
+            batch = { index: batches.length, diff: '', includedFiles: [], fileLines: new Map() };
+            batches.push(batch);
+        }
+        batch.diff += `${batch.includedFiles.length ? '\n' : ''}${chunk}`;
+        batch.includedFiles.push(file.filename);
+        batch.fileLines.set(file.filename, diff_addedLines(file.patch));
+        totalLength += addedLength;
+    }
+    return { batches, omittedFiles };
+}
+function displayFile(path) {
+    return path
+        .replace(/[\r\n]/g, ' ')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/[\\`*_{}[\]()!|~]/g, '\\$&');
+}
+function mergeBatchReviews(results, lang = 'zh') {
+    const inlines = [];
+    const bodyItems = [];
+    const seenInlines = new Set();
+    const seenBodyItems = new Set();
+    const summaries = [];
+    for (const result of [...results].sort((a, b) => a.index - b.index)) {
+        summaries.push(`### ${lang === 'zh' ? '批次' : 'Batch'} ${result.index + 1}\n\n${result.includedFiles.map(displayFile).join(', ')}\n\n${result.summary}`);
+        for (const inline of result.inlines) {
+            const key = JSON.stringify([inline.path, inline.line, inline.body]);
+            if (seenInlines.has(key))
+                continue;
+            seenInlines.add(key);
+            inlines.push(inline);
+        }
+        for (const body of result.bodyItems) {
+            if (seenBodyItems.has(body))
+                continue;
+            seenBodyItems.add(body);
+            bodyItems.push(body);
+        }
+    }
+    if (results.length > 1) {
+        summaries.unshift(lang === 'zh'
+            ? '以下结论仅适用于各批次列出的文件。'
+            : 'Each summary applies only to the files in its batch.');
+    }
+    return { summary: summaries.join('\n\n'), inlines, bodyItems };
+}
+
 ;// CONCATENATED MODULE: ./src/core/coverage.ts
 function escapeText(value) {
     return value
@@ -43557,7 +43651,14 @@ function escapeText(value) {
 function formatCoverage(coverage, headSha, lang, missingFiles = 0) {
     const zh = lang === 'zh';
     const missing = Math.max(0, Math.floor(missingFiles));
-    const partial = coverage.omittedFiles.length + coverage.unavailableFiles.length + missing > 0;
+    const failedFiles = coverage.failedFiles ?? [];
+    const unstartedFiles = coverage.unstartedFiles ?? [];
+    const partial = coverage.omittedFiles.length +
+        coverage.unavailableFiles.length +
+        missing +
+        failedFiles.length +
+        unstartedFiles.length >
+        0;
     const lines = [
         zh ? '## 评审覆盖范围' : '## Review coverage',
         `${zh ? '提交' : 'Commit'}: ${escapeText(headSha)}`,
@@ -43565,6 +43666,11 @@ function formatCoverage(coverage, headSha, lang, missingFiles = 0) {
             ? `已评审 ${coverage.reviewedFiles.length} 个文件；按配置忽略 ${coverage.ignoredFiles.length} 个；预算不足略过 ${coverage.omittedFiles.length} 个；无可用 patch ${coverage.unavailableFiles.length} 个；API 未返回 ${missing} 个。`
             : `Reviewed ${coverage.reviewedFiles.length} files; ignored by configuration ${coverage.ignoredFiles.length}; omitted by budget ${coverage.omittedFiles.length}; unavailable patches ${coverage.unavailableFiles.length}; missing from API ${missing}.`,
     ];
+    if (failedFiles.length || unstartedFiles.length) {
+        lines.push(zh
+            ? `批次评审失败 ${failedFiles.length} 个文件；请求预算耗尽未启动 ${unstartedFiles.length} 个文件。`
+            : `Failed batch reviews: ${failedFiles.length} files; not started because the request budget was exhausted: ${unstartedFiles.length} files.`);
+    }
     if (partial) {
         lines.push(zh
             ? '本次仅覆盖部分变更；结论不适用于未评审文件。'
@@ -43573,6 +43679,8 @@ function formatCoverage(coverage, headSha, lang, missingFiles = 0) {
     for (const [label, files] of [
         [zh ? '预算不足略过' : 'Omitted by budget', coverage.omittedFiles],
         [zh ? '无可用 patch' : 'Unavailable patches', coverage.unavailableFiles],
+        [zh ? '批次评审失败' : 'Failed batch reviews', failedFiles],
+        [zh ? '请求预算耗尽未启动' : 'Not started: request budget exhausted', unstartedFiles],
     ]) {
         if (!files.length)
             continue;
@@ -43880,6 +43988,33 @@ async function paginate(fetchPage) {
 
 
 
+
+function partitionFiles(files, config) {
+    const validFiles = [];
+    const ignoredFiles = [];
+    const unavailableFiles = [];
+    for (const file of files) {
+        if (isIgnored(file.filename, config.ignorePatterns)) {
+            ignoredFiles.push(file.filename);
+            lib_core.info(`忽略 ${file.filename}`);
+        }
+        else if (!file.patch?.trim()) {
+            unavailableFiles.push(file.filename);
+        }
+        else {
+            validFiles.push({ filename: file.filename, patch: file.patch });
+        }
+    }
+    return { validFiles, ignoredFiles, unavailableFiles };
+}
+function buildReviewBatchesFromFiles(files, config) {
+    const { validFiles, ignoredFiles, unavailableFiles } = partitionFiles(files, config);
+    const { batches, omittedFiles } = buildDiffBatches(validFiles, config.maxDiffChars, config.batchDiffChars);
+    return {
+        batches,
+        coverage: { reviewedFiles: [], ignoredFiles, omittedFiles, unavailableFiles },
+    };
+}
 /** 分页拉取 PR 全部文件列表（含 patch 字段） */
 async function listPrFiles(octokit, repo, prNumber) {
     return paginate((page) => octokit.rest.pulls
@@ -43891,21 +44026,7 @@ async function listPrFiles(octokit, repo, prNumber) {
  * 返回 diff 文本与被保留文件的新增行号集合。
  */
 function buildDiffFromFiles(files, config) {
-    const validFiles = [];
-    const ignoredFiles = [];
-    const unavailableFiles = [];
-    for (const f of files) {
-        if (isIgnored(f.filename, config.ignorePatterns)) {
-            ignoredFiles.push(f.filename);
-            core.info(`忽略 ${f.filename}`);
-            continue;
-        }
-        if (!f.patch?.trim()) {
-            unavailableFiles.push(f.filename);
-            continue;
-        }
-        validFiles.push({ filename: f.filename, patch: f.patch });
-    }
+    const { validFiles, ignoredFiles, unavailableFiles } = partitionFiles(files, config);
     const result = formatDiffAndTruncate(validFiles, config.maxDiffChars, config.language);
     if (result.truncated) {
         core.info(`diff 过大，已按文件块安全截断到 ${config.maxDiffChars} 字符以内（略去 ${result.omittedCount} 个文件）`);
@@ -43995,7 +44116,7 @@ async function deleteOldInlineComments(octokit, repo, prNumber, oldCommentIds, a
             await octokit.rest.pulls.deleteReviewComment({ ...repo, comment_id: id });
         }
         catch (e) {
-            core.warning(`删除旧 inline 评论 #${id} 失败：${errMsg(e)}`);
+            lib_core.warning(`删除旧 inline 评论 #${id} 失败：${errMsg(e)}`);
         }
     }
 }
@@ -44035,7 +44156,7 @@ async function resolveOldInlineThreads(octokit, repo, prNumber, oldCommentIds, a
           }`, { threadId: thread.id });
             }
             catch (e) {
-                core.warning(`标记评审线程 ${thread.id} 已解决失败：${errMsg(e)}`);
+                lib_core.warning(`标记评审线程 ${thread.id} 已解决失败：${errMsg(e)}`);
             }
         }
         const pageInfo = data.repository?.pullRequest?.reviewThreads?.pageInfo;
@@ -44071,7 +44192,7 @@ async function postReview(octokit, repo, prNumber, headSha, body, inlines, onUpd
             oldCommentIds = await snapshotInlineComments(octokit, repo, prNumber);
         }
         catch (e) {
-            core.warning(`读取历史 inline 评论失败，本轮保留历史：${errMsg(e)}`);
+            lib_core.warning(`读取历史 inline 评论失败，本轮保留历史：${errMsg(e)}`);
         }
     }
     const failed = [];
@@ -44086,11 +44207,11 @@ async function postReview(octokit, repo, prNumber, headSha, body, inlines, onUpd
                 side: 'RIGHT',
                 commit_id: headSha,
             });
-            core.info(`inline 评论: ${ic.path}:${ic.line}`);
+            lib_core.info(`inline 评论: ${ic.path}:${ic.line}`);
         }
         catch (e) {
             failed.push(ic);
-            core.warning(`inline 评论失败，将完整内容保存在汇总：${errMsg(e)}`);
+            lib_core.warning(`inline 评论失败，将完整内容保存在汇总：${errMsg(e)}`);
         }
     }
     const fallback = failed.length
@@ -44112,7 +44233,7 @@ async function postReview(octokit, repo, prNumber, headSha, body, inlines, onUpd
     }
     // A write response identifies both App and PAT authors without guessing a bot login.
     if (onUpdate !== 'keep' && actorId === undefined) {
-        core.warning('无法确认评审发布身份，本轮保留历史 inline 评论');
+        lib_core.warning('无法确认评审发布身份，本轮保留历史 inline 评论');
     }
     if (failed.length === 0 && actorId !== undefined && oldCommentIds.size > 0) {
         try {
@@ -44124,7 +44245,7 @@ async function postReview(octokit, repo, prNumber, headSha, body, inlines, onUpd
             }
         }
         catch (e) {
-            core.warning(`清理历史 inline 评论失败，新评审已保存：${errMsg(e)}`);
+            lib_core.warning(`清理历史 inline 评论失败，新评审已保存：${errMsg(e)}`);
         }
     }
     return { postedInlineCount: inlines.length - failed.length, failedInlineCount: failed.length };
@@ -44205,6 +44326,39 @@ function buildPrompt(diff, lang, customInstructions = '', enableCodingPlan = tru
 
 
 
+class BudgetExceededError extends Error {
+    constructor() {
+        super('LLM 请求预算已耗尽');
+        this.name = 'BudgetExceededError';
+    }
+}
+function createLlmRequestBudget(limit) {
+    return { limit, used: 0, durationMs: 0, usage: null, usageRequests: 0 };
+}
+function requireRequestBudget(budget) {
+    if (budget && budget.used >= budget.limit)
+        throw new BudgetExceededError();
+}
+function recordUsage(data, budget) {
+    if (!budget || typeof data !== 'object' || data === null || !('usage' in data))
+        return;
+    const usage = data.usage;
+    if (typeof usage !== 'object' || usage === null)
+        return;
+    const tokens = ['prompt_tokens', 'completion_tokens', 'total_tokens'].map((key) => key in usage ? usage[key] : undefined);
+    if (!tokens.every((value) => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0)) {
+        return;
+    }
+    const previous = budget.usage;
+    const sums = tokens.map((value, index) => value +
+        (previous
+            ? [previous.promptTokens, previous.completionTokens, previous.totalTokens][index]
+            : 0));
+    if (!sums.every(Number.isSafeInteger))
+        return;
+    budget.usage = { promptTokens: sums[0], completionTokens: sums[1], totalTokens: sums[2] };
+    budget.usageRequests += 1;
+}
 /** 异步等待毫秒数，遵循 Promise.withResolvers 规范 */
 function delay(ms) {
     const { promise, resolve } = Promise.withResolvers();
@@ -44223,14 +44377,14 @@ function warnCodingPlanMismatch(config, apiKey) {
     const aliPayAsYouGo = config.llmEndpoint.includes('dashscope.aliyuncs.com') && !aliCodingEndpoint;
     const aliCodingKey = apiKey.startsWith('sk-sp-');
     if (aliCodingKey && aliPayAsYouGo) {
-        core.warning('检测到阿里 Coding Plan API Key（sk-sp-）但端点是按量计费端点（dashscope.aliyuncs.com）。两者不互通：该调用将返回 invalid_api_key。如需套餐抵扣请改用 provider: qwen-coding（https://coding.dashscope.aliyuncs.com/v1）');
+        lib_core.warning('检测到阿里 Coding Plan API Key（sk-sp-）但端点是按量计费端点（dashscope.aliyuncs.com）。两者不互通：该调用将返回 invalid_api_key。如需套餐抵扣请改用 provider: qwen-coding（https://coding.dashscope.aliyuncs.com/v1）');
     }
     else if (!aliCodingKey && aliCodingEndpoint) {
-        core.warning('端点是阿里 Coding Plan 套餐端点（coding.dashscope.aliyuncs.com）但 key 不是套餐格式（sk-sp-）。两者不互通：通用 key 调用套餐端点将返回 invalid_api_key，且不会抵扣套餐额度');
+        lib_core.warning('端点是阿里 Coding Plan 套餐端点（coding.dashscope.aliyuncs.com）但 key 不是套餐格式（sk-sp-）。两者不互通：通用 key 调用套餐端点将返回 invalid_api_key，且不会抵扣套餐额度');
     }
     // MiniMax：套餐与按量共用端点，只能靠 key 前缀判别
     if (apiKey.startsWith('sk-cp-') && !config.llmEndpoint.includes('minimaxi.com')) {
-        core.warning('检测到 MiniMax Token Plan 订阅 Key（sk-cp-）但端点不是 api.minimaxi.com。订阅 Key 与其他平台/按量计费体系不互通，该调用将失败。MiniMax（含订阅）请使用 provider: minimax 或 minimax-token（https://api.minimaxi.com/v1）');
+        lib_core.warning('检测到 MiniMax Token Plan 订阅 Key（sk-cp-）但端点不是 api.minimaxi.com。订阅 Key 与其他平台/按量计费体系不互通，该调用将失败。MiniMax（含订阅）请使用 provider: minimax 或 minimax-token（https://api.minimaxi.com/v1）');
     }
 }
 /**
@@ -44240,7 +44394,7 @@ function warnCodingPlanMismatch(config, apiKey) {
  * 不做跨 provider 乱序兜底，避免拿 A 家的 key 打 B 家端点。
  */
 function readLlmSettings(config) {
-    let apiKey = core.getInput('llm_api_key');
+    let apiKey = lib_core.getInput('llm_api_key');
     if (!apiKey && config.provider) {
         apiKey = process.env[PROVIDER_ENV_KEYS[config.provider]] ?? '';
     }
@@ -44259,7 +44413,7 @@ function readLlmSettings(config) {
             : '（可设置 LLM_API_KEY）';
         throw new Error(`缺少 LLM API Key：请在 Action with 中配置 llm_api_key 或设置环境变量${hint}`);
     }
-    core.setSecret(apiKey);
+    lib_core.setSecret(apiKey);
     warnCodingPlanMismatch(config, apiKey);
     return {
         endpoint: config.llmEndpoint.replace(/\/+$/, ''),
@@ -44270,48 +44424,59 @@ function readLlmSettings(config) {
     };
 }
 /** 单次调用 OpenAI 兼容的 /chat/completions 接口，非 2xx 抛 LlmHttpError */
-async function chatCompletions(settings, body) {
-    const resp = await fetch(`${settings.endpoint}/chat/completions`, {
-        method: 'POST',
-        headers: {
-            Authorization: `Bearer ${settings.apiKey}`,
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(settings.timeoutMs),
-    });
-    if (!resp.ok) {
-        await resp.body?.cancel().catch(() => { });
-        throw new LlmHttpError(resp.status, '端点请求失败');
-    }
-    let data;
+async function chatCompletions(settings, body, budget) {
+    requireRequestBudget(budget);
+    if (budget)
+        budget.used += 1;
+    const started = performance.now();
     try {
-        data = await resp.json();
+        const resp = await fetch(`${settings.endpoint}/chat/completions`, {
+            method: 'POST',
+            headers: {
+                Authorization: `Bearer ${settings.apiKey}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(body),
+            signal: AbortSignal.timeout(settings.timeoutMs),
+        });
+        if (!resp.ok) {
+            await resp.body?.cancel().catch(() => { });
+            throw new LlmHttpError(resp.status, '端点请求失败');
+        }
+        let data;
+        try {
+            data = await resp.json();
+        }
+        catch {
+            throw new Error('LLM 响应不是有效 JSON');
+        }
+        recordUsage(data, budget);
+        if (typeof data !== 'object' ||
+            data === null ||
+            !('choices' in data) ||
+            !Array.isArray(data.choices)) {
+            throw new Error('LLM 响应缺少 choices 数组');
+        }
+        const choice = data.choices[0];
+        if (typeof choice !== 'object' || choice === null) {
+            throw new Error('LLM 响应缺少评审结果');
+        }
+        if ('finish_reason' in choice && choice.finish_reason !== 'stop') {
+            throw new Error('LLM 评审输出未正常完成，请检查输出限额或模型限制');
+        }
+        const message = 'message' in choice ? choice.message : undefined;
+        const content = typeof message === 'object' && message !== null && 'content' in message
+            ? message.content
+            : undefined;
+        if (typeof content !== 'string' || !content.trim()) {
+            throw new Error('LLM 响应缺少非空 content 字符串');
+        }
+        return content.trim();
     }
-    catch {
-        throw new Error('LLM 响应不是有效 JSON');
+    finally {
+        if (budget)
+            budget.durationMs += Math.max(0, performance.now() - started);
     }
-    if (typeof data !== 'object' ||
-        data === null ||
-        !('choices' in data) ||
-        !Array.isArray(data.choices)) {
-        throw new Error('LLM 响应缺少 choices 数组');
-    }
-    const choice = data.choices[0];
-    if (typeof choice !== 'object' || choice === null) {
-        throw new Error('LLM 响应缺少评审结果');
-    }
-    if ('finish_reason' in choice && choice.finish_reason !== 'stop') {
-        throw new Error('LLM 评审输出未正常完成，请检查输出限额或模型限制');
-    }
-    const message = 'message' in choice ? choice.message : undefined;
-    const content = typeof message === 'object' && message !== null && 'content' in message
-        ? message.content
-        : undefined;
-    if (typeof content !== 'string' || !content.trim()) {
-        throw new Error('LLM 响应缺少非空 content 字符串');
-    }
-    return content.trim();
 }
 /**
  * 调用 LLM 产出评审内容：
@@ -44319,7 +44484,7 @@ async function chatCompletions(settings, body) {
  * - 部分兼容端点不支持 response_format（通常报 400），自动去掉该参数重试一次；
  * - 429/5xx/超时/网络错误按指数退避重试，最多 maxRetries 次。
  */
-async function callLlm(diff, config, settings) {
+async function callLlm(diff, config, settings, budget) {
     const prompt = buildPrompt(diff, config.language, config.customInstructions, config.codingPlan);
     const body = {
         model: settings.model,
@@ -44331,26 +44496,30 @@ async function callLlm(diff, config, settings) {
     let attempt = 0;
     for (;;) {
         try {
-            return await chatCompletions(settings, body);
+            return await chatCompletions(settings, body, budget);
         }
         catch (e) {
             if (e instanceof LlmHttpError && e.status === 400 && !droppedResponseFormat) {
+                requireRequestBudget(budget);
                 droppedResponseFormat = true;
                 delete body.response_format;
-                core.warning('端点可能不支持 response_format，已去掉该参数重试');
+                lib_core.warning('端点可能不支持 response_format，已去掉该参数重试');
                 continue;
             }
             attempt += 1;
             if (attempt > settings.maxRetries || !isRetryableLlmError(e))
                 throw e;
+            requireRequestBudget(budget);
             const delayMs = 1000 * 2 ** attempt;
-            core.warning(`LLM 调用暂时失败${e instanceof LlmHttpError ? `（HTTP ${e.status}）` : ''}，${delayMs / 1000}s 后重试（${attempt}/${settings.maxRetries}）`);
+            lib_core.warning(`LLM 调用暂时失败${e instanceof LlmHttpError ? `（HTTP ${e.status}）` : ''}，${delayMs / 1000}s 后重试（${attempt}/${settings.maxRetries}）`);
             await delay(delayMs);
         }
     }
 }
 
 ;// CONCATENATED MODULE: ./src/run.ts
+
+
 
 
 
@@ -44368,6 +44537,15 @@ async function run(context = github.context) {
         reviewed_files: 0,
         omitted_files: 0,
         reason: 'Unable to initialize the PR review',
+        requests_used: 0,
+        batches_completed: 0,
+        batches_failed: 0,
+        batches_unstarted: 0,
+        duration_ms: 0,
+        prompt_tokens: '',
+        completion_tokens: '',
+        total_tokens: '',
+        usage_complete: false,
     };
     try {
         await execute(context, outcome);
@@ -44375,13 +44553,13 @@ async function run(context = github.context) {
     catch {
         outcome.status = 'failed';
         outcome.reason ||= 'Review execution failed';
-        core.setFailed(`评审失败：${outcome.reason}`);
+        lib_core.setFailed(`评审失败：${outcome.reason}`);
     }
     for (const [name, value] of Object.entries(outcome))
-        core.setOutput(name, value);
-    core.info(`Inori: ${outcome.status} — ${outcome.reason}`);
+        lib_core.setOutput(name, value);
+    lib_core.info(`Inori: ${outcome.status} — ${outcome.reason}`);
     try {
-        await core.summary
+        await lib_core.summary
             .addHeading('Inori')
             .addTable([
             [
@@ -44399,10 +44577,40 @@ async function run(context = github.context) {
                 String(outcome.omitted_files),
             ],
         ])
+            .addTable([
+            [
+                { data: 'LLM requests', header: true },
+                { data: 'Completed batches', header: true },
+                { data: 'Failed batches', header: true },
+                { data: 'Unstarted batches', header: true },
+                { data: 'Model phase (ms)', header: true },
+            ],
+            [
+                String(outcome.requests_used),
+                String(outcome.batches_completed),
+                String(outcome.batches_failed),
+                String(outcome.batches_unstarted),
+                String(outcome.duration_ms),
+            ],
+        ])
+            .addTable([
+            [
+                { data: 'Reported prompt tokens', header: true },
+                { data: 'Reported completion tokens', header: true },
+                { data: 'Reported total tokens', header: true },
+                { data: 'Usage complete', header: true },
+            ],
+            [
+                String(outcome.prompt_tokens === '' ? 'unknown' : outcome.prompt_tokens),
+                String(outcome.completion_tokens === '' ? 'unknown' : outcome.completion_tokens),
+                String(outcome.total_tokens === '' ? 'unknown' : outcome.total_tokens),
+                String(outcome.usage_complete),
+            ],
+        ])
             .write();
     }
     catch (error) {
-        core.warning(`Cannot write job summary: ${error instanceof Error ? error.message : String(error)}`);
+        lib_core.warning(`Cannot write job summary: ${error instanceof Error ? error.message : String(error)}`);
     }
     return outcome;
 }
@@ -44415,7 +44623,7 @@ async function execute(context, outcome) {
     outcome.head_sha = headSha ?? '';
     if (!headSha || !baseSha)
         throw new Error('PR head and base SHA are required');
-    const octokit = github.getOctokit(core.getInput('github_token', { required: true }));
+    const octokit = github.getOctokit(lib_core.getInput('github_token', { required: true }));
     const repo = context.repo;
     const isCurrent = async () => {
         const current = await readPrSnapshot(octokit, repo, pr.number);
@@ -44466,10 +44674,10 @@ async function execute(context, outcome) {
         outcome.reason = pathsSkip.reason ?? 'Paths excluded by review rules';
         return;
     }
-    const { diff, fileLines, coverage } = buildDiffFromFiles(files, config);
+    const { batches, coverage } = buildReviewBatchesFromFiles(files, config);
     outcome.omitted_files =
         coverage.omittedFiles.length + coverage.unavailableFiles.length + missingFiles;
-    if (!diff.trim()) {
+    if (batches.length === 0) {
         outcome.status = outcome.omitted_files > 0 ? 'partial' : 'skipped';
         outcome.reason =
             outcome.omitted_files > 0
@@ -44479,10 +44687,57 @@ async function execute(context, outcome) {
     }
     outcome.reason = 'Unable to configure or complete the LLM review';
     const settings = readLlmSettings(config);
-    const content = await callLlm(diff, config, settings);
-    outcome.reason = 'The model response is not a valid complete review';
-    const parsed = parseReviews(content, fileLines, config.language);
+    const budget = createLlmRequestBudget(config.maxRequests);
+    const results = [];
+    coverage.failedFiles = [];
+    coverage.unstartedFiles = [];
+    let nextBatch = 0;
+    const started = performance.now();
+    try {
+        await Promise.all(Array.from({ length: Math.min(config.reviewConcurrency, batches.length) }, async () => {
+            for (;;) {
+                const batch = batches[nextBatch++];
+                if (!batch)
+                    return;
+                if (budget.used >= budget.limit) {
+                    coverage.unstartedFiles?.push(...batch.includedFiles);
+                    outcome.batches_unstarted += 1;
+                    continue;
+                }
+                let stage = 'LLM request';
+                try {
+                    const content = await callLlm(batch.diff, config, settings, budget);
+                    stage = 'model response validation';
+                    const parsed = parseReviews(content, batch.fileLines, config.language);
+                    results.push({ ...parsed, index: batch.index, includedFiles: batch.includedFiles });
+                    outcome.batches_completed += 1;
+                }
+                catch (error) {
+                    const reason = error instanceof BudgetExceededError ? 'LLM request budget exhausted' : stage;
+                    lib_core.warning(`Review batch ${batch.index + 1} failed (${reason})`);
+                    coverage.failedFiles?.push(...batch.includedFiles);
+                    outcome.batches_failed += 1;
+                }
+            }
+        }));
+    }
+    finally {
+        outcome.duration_ms = Math.max(0, Math.round(performance.now() - started));
+        outcome.requests_used = budget.used;
+        outcome.prompt_tokens = budget.usage?.promptTokens ?? '';
+        outcome.completion_tokens = budget.usage?.completionTokens ?? '';
+        outcome.total_tokens = budget.usage?.totalTokens ?? '';
+        outcome.usage_complete = budget.used > 0 && budget.usageRequests === budget.used;
+    }
+    const successes = results.sort((a, b) => a.index - b.index);
+    coverage.reviewedFiles = successes.flatMap((result) => result.includedFiles);
+    outcome.omitted_files += coverage.failedFiles.length + coverage.unstartedFiles.length;
     outcome.reviewed_files = coverage.reviewedFiles.length;
+    if (successes.length === 0) {
+        outcome.reason = 'No review batch completed successfully; no review was published';
+        throw new Error(outcome.reason);
+    }
+    const parsed = mergeBatchReviews(successes, config.language);
     outcome.findings_count = parsed.inlines.length + parsed.bodyItems.length;
     const coverageText = formatCoverage(coverage, headSha, config.language, missingFiles);
     outcome.reason = 'Unable to build the complete review body within the configured size limit';

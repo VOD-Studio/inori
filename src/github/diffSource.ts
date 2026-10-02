@@ -1,5 +1,6 @@
 import * as core from '@actions/core'
 import type { ResolvedConfig } from '../config'
+import { buildDiffBatches, type ReviewBatch } from '../core/batches'
 import type { ReviewCoverage } from '../core/coverage'
 import { addedLines, formatDiffAndTruncate, isIgnored, type PrFile } from '../core/diff'
 import { type OctokitInstance, paginate, type RepoContext } from './paginate'
@@ -11,6 +12,41 @@ export interface PrDiff {
   coverage: ReviewCoverage
   /** 各保留文件的新增行号集合（inline 锚点校验依据） */
   fileLines: Map<string, Set<number>>
+}
+
+export interface BatchPlan {
+  batches: ReviewBatch[]
+  coverage: ReviewCoverage
+}
+
+function partitionFiles(files: PrFile[], config: ResolvedConfig) {
+  const validFiles: { filename: string; patch: string }[] = []
+  const ignoredFiles: string[] = []
+  const unavailableFiles: string[] = []
+  for (const file of files) {
+    if (isIgnored(file.filename, config.ignorePatterns)) {
+      ignoredFiles.push(file.filename)
+      core.info(`忽略 ${file.filename}`)
+    } else if (!file.patch?.trim()) {
+      unavailableFiles.push(file.filename)
+    } else {
+      validFiles.push({ filename: file.filename, patch: file.patch })
+    }
+  }
+  return { validFiles, ignoredFiles, unavailableFiles }
+}
+
+export function buildReviewBatchesFromFiles(files: PrFile[], config: ResolvedConfig): BatchPlan {
+  const { validFiles, ignoredFiles, unavailableFiles } = partitionFiles(files, config)
+  const { batches, omittedFiles } = buildDiffBatches(
+    validFiles,
+    config.maxDiffChars,
+    config.batchDiffChars,
+  )
+  return {
+    batches,
+    coverage: { reviewedFiles: [], ignoredFiles, omittedFiles, unavailableFiles },
+  }
 }
 
 /** 分页拉取 PR 全部文件列表（含 patch 字段） */
@@ -31,21 +67,7 @@ export async function listPrFiles(
  * 返回 diff 文本与被保留文件的新增行号集合。
  */
 export function buildDiffFromFiles(files: PrFile[], config: ResolvedConfig): PrDiff {
-  const validFiles: { filename: string; patch: string }[] = []
-  const ignoredFiles: string[] = []
-  const unavailableFiles: string[] = []
-  for (const f of files) {
-    if (isIgnored(f.filename, config.ignorePatterns)) {
-      ignoredFiles.push(f.filename)
-      core.info(`忽略 ${f.filename}`)
-      continue
-    }
-    if (!f.patch?.trim()) {
-      unavailableFiles.push(f.filename)
-      continue
-    }
-    validFiles.push({ filename: f.filename, patch: f.patch })
-  }
+  const { validFiles, ignoredFiles, unavailableFiles } = partitionFiles(files, config)
 
   const result = formatDiffAndTruncate(validFiles, config.maxDiffChars, config.language)
   if (result.truncated) {

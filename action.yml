@@ -46,7 +46,19 @@ inputs:
     required: false
     default: ''
   max_diff_chars:
-    description: 'Hard diff character budget; omit whole files that do not fit and try subsequent files (default 40000)'
+    description: 'Total diff character budget across all review batches; omit whole files that do not fit (default 40000)'
+    required: false
+    default: ''
+  batch_diff_chars:
+    description: 'Diff character budget per review request, bounded by max_diff_chars (default 40000)'
+    required: false
+    default: ''
+  max_requests:
+    description: 'Maximum LLM HTTP requests per run, including retries and compatibility fallback (default 4)'
+    required: false
+    default: ''
+  review_concurrency:
+    description: 'Maximum concurrent review batches, from 1 to 3 (default 1)'
     required: false
     default: ''
   max_body_chars:
@@ -87,9 +99,27 @@ outputs:
   reviewed_files:
     description: 'Number of files covered by a valid completed model response'
   omitted_files:
-    description: 'Number of files omitted by budget, unavailable patches, or API limits (excluding ignored files)'
+    description: 'Number of files omitted by budgets, unavailable patches, API limits, or failed batches (excluding ignored files)'
   reason:
     description: 'Explanation of the run status'
+  requests_used:
+    description: 'Number of explicit LLM HTTP requests, including retries and compatibility fallback'
+  batches_completed:
+    description: 'Number of batches with a valid completed model response'
+  batches_failed:
+    description: 'Number of started batches that failed to produce a valid review'
+  batches_unstarted:
+    description: 'Number of batches not started because the request budget was exhausted'
+  duration_ms:
+    description: 'Elapsed batch-processing time in milliseconds, including retries and parsing, excluding PR fetch and publication'
+  prompt_tokens:
+    description: 'Reported prompt tokens; empty when no token usage was reported'
+  completion_tokens:
+    description: 'Reported completion tokens; empty when no token usage was reported'
+  total_tokens:
+    description: 'Reported total tokens; empty when no token usage was reported'
+  usage_complete:
+    description: 'Whether token usage was reported for every explicit LLM request'
 runs:
   using: 'node24'
   main: 'dist/index.js'

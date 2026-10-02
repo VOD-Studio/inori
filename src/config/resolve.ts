@@ -21,7 +21,13 @@ const LIST_FIELDS = [
   'ignore_commit_prefixes',
   'ignore_authors',
 ] as const
-const INTEGER_FIELDS = ['max_diff_chars', 'max_body_chars'] as const
+const INTEGER_FIELDS = [
+  'max_diff_chars',
+  'batch_diff_chars',
+  'max_requests',
+  'review_concurrency',
+  'max_body_chars',
+] as const
 
 function validateFileConfig(value: unknown): asserts value is InoriConfig {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -71,6 +77,9 @@ function validateFileConfig(value: unknown): asserts value is InoriConfig {
   }
   if (typeof config.max_body_chars === 'number' && config.max_body_chars > 65536) {
     throw new Error('Invalid configuration: max_body_chars must not exceed 65536')
+  }
+  if (typeof config.review_concurrency === 'number' && config.review_concurrency > 3) {
+    throw new Error('Invalid configuration: review_concurrency must not exceed 3')
   }
 }
 
@@ -218,6 +227,19 @@ export function resolveConfig(inputs: ActionInputs, fileConfig: InoriConfig = {}
     DEFAULTS.maxBodyChars,
   )
 
+  const batchDiffChars = intField(
+    inputs.batch_diff_chars,
+    fileConfig.batch_diff_chars,
+    DEFAULTS.batchDiffChars,
+  )
+  const maxRequests = intField(inputs.max_requests, fileConfig.max_requests, DEFAULTS.maxRequests)
+  const reviewConcurrency = intField(
+    inputs.review_concurrency,
+    fileConfig.review_concurrency,
+    DEFAULTS.reviewConcurrency,
+  )
+  if (reviewConcurrency > 3) throw new Error('review_concurrency must not exceed 3')
+
   if (maxBodyChars > 65536) throw new Error('max_body_chars must not exceed 65536')
 
   // 6. onUpdate: on_update 显式 > keep_previous_comments legacy > 文件 > 默认
@@ -250,6 +272,9 @@ export function resolveConfig(inputs: ActionInputs, fileConfig: InoriConfig = {}
     ignoreCommitPrefixes,
     customInstructions,
     maxDiffChars,
+    batchDiffChars,
+    maxRequests,
+    reviewConcurrency,
     maxBodyChars,
     onUpdate,
     skipDraft,

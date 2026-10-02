@@ -16,6 +16,61 @@ export interface LlmSettings {
   maxRetries: number
 }
 
+export interface LlmUsage {
+  promptTokens: number
+  completionTokens: number
+  totalTokens: number
+}
+
+export interface LlmRequestBudget {
+  limit: number
+  used: number
+  durationMs: number
+  usage: LlmUsage | null
+  /** 仅累计端点报告了可信 usage 的请求；不等于 used 时，用量是不完整的。 */
+  usageRequests: number
+}
+
+export class BudgetExceededError extends Error {
+  constructor() {
+    super('LLM 请求预算已耗尽')
+    this.name = 'BudgetExceededError'
+  }
+}
+
+export function createLlmRequestBudget(limit: number): LlmRequestBudget {
+  return { limit, used: 0, durationMs: 0, usage: null, usageRequests: 0 }
+}
+
+function requireRequestBudget(budget?: LlmRequestBudget): void {
+  if (budget && budget.used >= budget.limit) throw new BudgetExceededError()
+}
+
+function recordUsage(data: unknown, budget?: LlmRequestBudget): void {
+  if (!budget || typeof data !== 'object' || data === null || !('usage' in data)) return
+  const usage = data.usage
+  if (typeof usage !== 'object' || usage === null) return
+  const tokens = ['prompt_tokens', 'completion_tokens', 'total_tokens'].map((key) =>
+    key in usage ? usage[key as keyof typeof usage] : undefined,
+  )
+  if (
+    !tokens.every((value) => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0)
+  ) {
+    return
+  }
+  const previous = budget.usage
+  const sums = (tokens as number[]).map(
+    (value, index) =>
+      value +
+      (previous
+        ? [previous.promptTokens, previous.completionTokens, previous.totalTokens][index]
+        : 0),
+  )
+  if (!sums.every(Number.isSafeInteger)) return
+  budget.usage = { promptTokens: sums[0], completionTokens: sums[1], totalTokens: sums[2] }
+  budget.usageRequests += 1
+}
+
 /** 异步等待毫秒数，遵循 Promise.withResolvers 规范 */
 function delay(ms: number): Promise<void> {
   const { promise, resolve } = Promise.withResolvers<void>()
@@ -97,50 +152,59 @@ export function readLlmSettings(config: ResolvedConfig): LlmSettings {
 async function chatCompletions(
   settings: LlmSettings,
   body: Record<string, unknown>,
+  budget?: LlmRequestBudget,
 ): Promise<string> {
-  const resp = await fetch(`${settings.endpoint}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${settings.apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(settings.timeoutMs),
-  })
-  if (!resp.ok) {
-    await resp.body?.cancel().catch(() => {})
-    throw new LlmHttpError(resp.status, '端点请求失败')
-  }
-  let data: unknown
+  requireRequestBudget(budget)
+  if (budget) budget.used += 1
+  const started = performance.now()
   try {
-    data = await resp.json()
-  } catch {
-    throw new Error('LLM 响应不是有效 JSON')
+    const resp = await fetch(`${settings.endpoint}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${settings.apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(settings.timeoutMs),
+    })
+    if (!resp.ok) {
+      await resp.body?.cancel().catch(() => {})
+      throw new LlmHttpError(resp.status, '端点请求失败')
+    }
+    let data: unknown
+    try {
+      data = await resp.json()
+    } catch {
+      throw new Error('LLM 响应不是有效 JSON')
+    }
+    recordUsage(data, budget)
+    if (
+      typeof data !== 'object' ||
+      data === null ||
+      !('choices' in data) ||
+      !Array.isArray(data.choices)
+    ) {
+      throw new Error('LLM 响应缺少 choices 数组')
+    }
+    const choice: unknown = data.choices[0]
+    if (typeof choice !== 'object' || choice === null) {
+      throw new Error('LLM 响应缺少评审结果')
+    }
+    if ('finish_reason' in choice && choice.finish_reason !== 'stop') {
+      throw new Error('LLM 评审输出未正常完成，请检查输出限额或模型限制')
+    }
+    const message = 'message' in choice ? choice.message : undefined
+    const content =
+      typeof message === 'object' && message !== null && 'content' in message
+        ? message.content
+        : undefined
+    if (typeof content !== 'string' || !content.trim()) {
+      throw new Error('LLM 响应缺少非空 content 字符串')
+    }
+    return content.trim()
+  } finally {
+    if (budget) budget.durationMs += Math.max(0, performance.now() - started)
   }
-  if (
-    typeof data !== 'object' ||
-    data === null ||
-    !('choices' in data) ||
-    !Array.isArray(data.choices)
-  ) {
-    throw new Error('LLM 响应缺少 choices 数组')
-  }
-  const choice: unknown = data.choices[0]
-  if (typeof choice !== 'object' || choice === null) {
-    throw new Error('LLM 响应缺少评审结果')
-  }
-  if ('finish_reason' in choice && choice.finish_reason !== 'stop') {
-    throw new Error('LLM 评审输出未正常完成，请检查输出限额或模型限制')
-  }
-  const message = 'message' in choice ? choice.message : undefined
-  const content =
-    typeof message === 'object' && message !== null && 'content' in message
-      ? message.content
-      : undefined
-  if (typeof content !== 'string' || !content.trim()) {
-    throw new Error('LLM 响应缺少非空 content 字符串')
-  }
-  return content.trim()
 }
 
 /**
@@ -153,6 +217,7 @@ export async function callLlm(
   diff: string,
   config: ResolvedConfig,
   settings: LlmSettings,
+  budget?: LlmRequestBudget,
 ): Promise<string> {
   const prompt = buildPrompt(diff, config.language, config.customInstructions, config.codingPlan)
   const body: Record<string, unknown> = {
@@ -166,9 +231,10 @@ export async function callLlm(
   let attempt = 0
   for (;;) {
     try {
-      return await chatCompletions(settings, body)
+      return await chatCompletions(settings, body, budget)
     } catch (e) {
       if (e instanceof LlmHttpError && e.status === 400 && !droppedResponseFormat) {
+        requireRequestBudget(budget)
         droppedResponseFormat = true
         delete body.response_format
         core.warning('端点可能不支持 response_format，已去掉该参数重试')
@@ -176,6 +242,7 @@ export async function callLlm(
       }
       attempt += 1
       if (attempt > settings.maxRetries || !isRetryableLlmError(e)) throw e
+      requireRequestBudget(budget)
       const delayMs = 1000 * 2 ** attempt
       core.warning(
         `LLM 调用暂时失败${e instanceof LlmHttpError ? `（HTTP ${e.status}）` : ''}，${delayMs / 1000}s 后重试（${attempt}/${settings.maxRetries}）`,

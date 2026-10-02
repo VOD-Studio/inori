@@ -1,12 +1,14 @@
 import * as core from '@actions/core'
 import * as github from '@actions/github'
 import { loadConfig } from './config'
+import { mergeBatchReviews } from './core/batches'
 import { formatCoverage } from './core/coverage'
 import { buildReviewBody, parseReviews } from './core/review'
 import { shouldSkipByCommitPrefixes, shouldSkipByPaths, shouldSkipReview } from './core/skip'
-import { buildDiffFromFiles, listPrCommitSubjects, listPrFiles, postReview } from './github'
+import { listPrCommitSubjects, listPrFiles, postReview } from './github'
 import { loadBaseConfig, readPrSnapshot } from './github/configSource'
-import { callLlm, readLlmSettings } from './llm'
+import { buildReviewBatchesFromFiles } from './github/diffSource'
+import { BudgetExceededError, callLlm, createLlmRequestBudget, readLlmSettings } from './llm'
 
 interface PrPayload {
   number: number
@@ -23,6 +25,15 @@ export interface RunOutcome {
   reviewed_files: number
   omitted_files: number
   reason: string
+  requests_used: number
+  batches_completed: number
+  batches_failed: number
+  batches_unstarted: number
+  duration_ms: number
+  prompt_tokens: number | ''
+  completion_tokens: number | ''
+  total_tokens: number | ''
+  usage_complete: boolean
 }
 
 export async function run(context = github.context): Promise<RunOutcome> {
@@ -33,6 +44,15 @@ export async function run(context = github.context): Promise<RunOutcome> {
     reviewed_files: 0,
     omitted_files: 0,
     reason: 'Unable to initialize the PR review',
+    requests_used: 0,
+    batches_completed: 0,
+    batches_failed: 0,
+    batches_unstarted: 0,
+    duration_ms: 0,
+    prompt_tokens: '',
+    completion_tokens: '',
+    total_tokens: '',
+    usage_complete: false,
   }
   try {
     await execute(context, outcome)
@@ -60,6 +80,36 @@ export async function run(context = github.context): Promise<RunOutcome> {
           String(outcome.findings_count),
           String(outcome.reviewed_files),
           String(outcome.omitted_files),
+        ],
+      ])
+      .addTable([
+        [
+          { data: 'LLM requests', header: true },
+          { data: 'Completed batches', header: true },
+          { data: 'Failed batches', header: true },
+          { data: 'Unstarted batches', header: true },
+          { data: 'Model phase (ms)', header: true },
+        ],
+        [
+          String(outcome.requests_used),
+          String(outcome.batches_completed),
+          String(outcome.batches_failed),
+          String(outcome.batches_unstarted),
+          String(outcome.duration_ms),
+        ],
+      ])
+      .addTable([
+        [
+          { data: 'Reported prompt tokens', header: true },
+          { data: 'Reported completion tokens', header: true },
+          { data: 'Reported total tokens', header: true },
+          { data: 'Usage complete', header: true },
+        ],
+        [
+          String(outcome.prompt_tokens === '' ? 'unknown' : outcome.prompt_tokens),
+          String(outcome.completion_tokens === '' ? 'unknown' : outcome.completion_tokens),
+          String(outcome.total_tokens === '' ? 'unknown' : outcome.total_tokens),
+          String(outcome.usage_complete),
         ],
       ])
       .write()
@@ -131,10 +181,10 @@ async function execute(context: typeof github.context, outcome: RunOutcome): Pro
     outcome.reason = pathsSkip.reason ?? 'Paths excluded by review rules'
     return
   }
-  const { diff, fileLines, coverage } = buildDiffFromFiles(files, config)
+  const { batches, coverage } = buildReviewBatchesFromFiles(files, config)
   outcome.omitted_files =
     coverage.omittedFiles.length + coverage.unavailableFiles.length + missingFiles
-  if (!diff.trim()) {
+  if (batches.length === 0) {
     outcome.status = outcome.omitted_files > 0 ? 'partial' : 'skipped'
     outcome.reason =
       outcome.omitted_files > 0
@@ -144,10 +194,58 @@ async function execute(context: typeof github.context, outcome: RunOutcome): Pro
   }
   outcome.reason = 'Unable to configure or complete the LLM review'
   const settings = readLlmSettings(config)
-  const content = await callLlm(diff, config, settings)
-  outcome.reason = 'The model response is not a valid complete review'
-  const parsed = parseReviews(content, fileLines, config.language)
+  const budget = createLlmRequestBudget(config.maxRequests)
+  const results: (ReturnType<typeof parseReviews> & { index: number; includedFiles: string[] })[] =
+    []
+  coverage.failedFiles = []
+  coverage.unstartedFiles = []
+  let nextBatch = 0
+  const started = performance.now()
+  try {
+    await Promise.all(
+      Array.from({ length: Math.min(config.reviewConcurrency, batches.length) }, async () => {
+        for (;;) {
+          const batch = batches[nextBatch++]
+          if (!batch) return
+          if (budget.used >= budget.limit) {
+            coverage.unstartedFiles?.push(...batch.includedFiles)
+            outcome.batches_unstarted += 1
+            continue
+          }
+          let stage = 'LLM request'
+          try {
+            const content = await callLlm(batch.diff, config, settings, budget)
+            stage = 'model response validation'
+            const parsed = parseReviews(content, batch.fileLines, config.language)
+            results.push({ ...parsed, index: batch.index, includedFiles: batch.includedFiles })
+            outcome.batches_completed += 1
+          } catch (error) {
+            const reason =
+              error instanceof BudgetExceededError ? 'LLM request budget exhausted' : stage
+            core.warning(`Review batch ${batch.index + 1} failed (${reason})`)
+            coverage.failedFiles?.push(...batch.includedFiles)
+            outcome.batches_failed += 1
+          }
+        }
+      }),
+    )
+  } finally {
+    outcome.duration_ms = Math.max(0, Math.round(performance.now() - started))
+    outcome.requests_used = budget.used
+    outcome.prompt_tokens = budget.usage?.promptTokens ?? ''
+    outcome.completion_tokens = budget.usage?.completionTokens ?? ''
+    outcome.total_tokens = budget.usage?.totalTokens ?? ''
+    outcome.usage_complete = budget.used > 0 && budget.usageRequests === budget.used
+  }
+  const successes = results.sort((a, b) => a.index - b.index)
+  coverage.reviewedFiles = successes.flatMap((result) => result.includedFiles)
+  outcome.omitted_files += coverage.failedFiles.length + coverage.unstartedFiles.length
   outcome.reviewed_files = coverage.reviewedFiles.length
+  if (successes.length === 0) {
+    outcome.reason = 'No review batch completed successfully; no review was published'
+    throw new Error(outcome.reason)
+  }
+  const parsed = mergeBatchReviews(successes, config.language)
   outcome.findings_count = parsed.inlines.length + parsed.bodyItems.length
   const coverageText = formatCoverage(coverage, headSha, config.language, missingFiles)
   outcome.reason = 'Unable to build the complete review body within the configured size limit'
