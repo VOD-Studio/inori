@@ -6,7 +6,7 @@ TypeScript 单包项目，`@vercel/ncc` 打包为自包含的 `dist/index.js`。
 ## 架构
 
 - **`src/config/`** 输入解析与配置合并（action input > `.github/inori.yml` > 默认值）。
-- **`src/core/`** 纯逻辑：diff 处理、prompt 构造、评审解析、跳过判定。零 `@actions/core` 依赖，可被 vitest 直接 import。
+- **`src/core/`** 纯逻辑：diff 处理、完整文件装批、批次结果合并、prompt 构造、评审解析、跳过判定。零 `@actions/core` 依赖，可被 vitest 直接 import。
 - **`src/github/`** GitHub API 适配：diff 拉取、分页、评审发布。
 - **`src/llm/`** provider 预设（`providers.ts`）与 LLM 调用。
 - **`src/index.ts`** 仅启动入口；**`src/run.ts`** 编排可信配置、快照校验、评审发布与运行状态，业务逻辑下沉到上述模块。
@@ -40,6 +40,14 @@ TypeScript 单包项目，`@vercel/ncc` 打包为自包含的 `dist/index.js`。
    网络不通就标注「未验证」，不猜测。验证矩阵维护在 `src/llm/providers.ts` 头部注释。
 5. **双语 README 对称**：改 README.md 必须同步 README.zh-CN.md，提交前 diff 两边
    确认无丢行（中文版曾丢过 `- uses:` 关键行）。
+
+## 分批评审约定
+
+- `max_diff_chars` 是整轮总预算，含文件头和全局文件分隔符（跨批次同样计一个换行）；`batch_diff_chars` 是单批上限，不能靠另开批次绕过总预算。两者默认同为 40000，保留默认单批范围，不拆文件或 hunk。
+- `max_requests` 默认 4，整轮共享，首次请求、重试和兼容回退都计入；只计显式 HTTP 尝试，不计 fetch 内部重定向。`review_concurrency` 默认 1，只允许 1 至 3。
+- 计划文件不等于已评审文件；`reviewed_files` 只累计有效完成的批次。失败和预算耗尽未启动要分别披露；部分成功可发布 partial 并保留历史，零成功失败且不发布。
+- 成功结果按批号排序；仅对完全相同的 inline `(path, line, body)` 和 body 条目去重。汇总不得增加模型调用，仍受 `max_body_chars` 约束。
+- Token 未知输出空串，只累计有效 usage；有任何请求缺失用量时 `usage_complete` 为 false。不得将请求数、字符预算或部分 token 统计表述为费用硬上限。
 
 ## provider 预设约定
 

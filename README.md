@@ -163,7 +163,10 @@ Inori automatically ignores common non-reviewable files by default (no need to r
 | `ignore_patterns` | Comma-separated globs of extra files to skip (in addition to built-in ignore rules) | — | — |
 | `paths_ignore` | Globs; when **all** changed files in a push match, the review is skipped entirely (pure CI/docs-only changes). Unlike `ignore_patterns`, which only removes files from the review context. | — | — |
 | `ignore_commit_prefixes` | Commit subject prefixes; when **all** commits in the PR match, skip the review (Conventional Commits semantics: no code change). Mixed PRs are still reviewed. | — | — |
-| `max_diff_chars` | Hard diff character budget; omit whole files that do not fit and try subsequent files | — | `40000` |
+| `max_diff_chars` | Total diff character budget for the run, including file headers and separators across batches | — | `40000` |
+| `batch_diff_chars` | Diff character budget per batch, capped by the total budget; never splits files or hunks | — | `40000` |
+| `max_requests` | Maximum explicit LLM HTTP requests for the run, including retries and the response-format fallback | — | `4` |
+| `review_concurrency` | Concurrent batch workers, an integer from 1 to 3 | — | `1` |
 | `max_body_chars` | Hard review-body character limit including coverage and marker; exceeding it fails instead of truncating findings (maximum 65536) | — | `60000` |
 | `custom_instructions` | Extra review rules appended to the prompt (team conventions, banned APIs, etc.) | — | — |
 | `on_update` | How to handle previous comments on re-review: `replace` (delete old), `resolve` (resolve threads via GraphQL), `keep` | — | `replace` |
@@ -182,16 +185,42 @@ Every run attempts to write the following Action outputs and a GitHub Actions jo
 | `head_sha` | PR head SHA associated with this run |
 | `findings_count` | Number of structurally validated findings, not necessarily the number published |
 | `reviewed_files` | Number of files covered by a valid completed model response; publication can still fail |
-| `omitted_files` | Files omitted by budget, unavailable patches, or API limits; excludes files ignored by rules |
+| `omitted_files` | Files omitted by diff/request budgets, unavailable patches, API limits, or failed batches; excludes files ignored by rules |
 | `reason` | Explanation of the run status |
+| `requests_used` | Explicit LLM HTTP requests started, including retries and response-format fallback; excludes redirects followed internally by fetch |
+| `batches_completed` | Batches with a valid completed model response |
+| `batches_failed` | Started batches that did not produce a valid review |
+| `batches_unstarted` | Batches not started because the request budget was exhausted |
+| `duration_ms` | Elapsed batch-processing time, including worker waiting, retries, and parsing; excludes PR fetching and publication |
+| `prompt_tokens` | Sum of reported prompt tokens; empty when usage is unavailable |
+| `completion_tokens` | Sum of reported completion tokens; empty when usage is unavailable |
+| `total_tokens` | Sum of reported total tokens; empty when usage is unavailable |
+| `usage_complete` | `true` only when at least one request started and every request reported valid usage; otherwise `false` |
 
 | Status | Meaning |
 |---|---|
 | `completed` | Available changes within the configured scope were reviewed and delivered completely; inspect `findings_count` for findings |
-| `partial` | Coverage is incomplete, or inline delivery fell back to the summary; when no diff is available, no review comment may have been published |
+| `partial` | Coverage is incomplete, some batches failed or could not start, or inline delivery fell back to the summary; when no diff is available, no review comment may have been published |
 | `skipped` | Draft, author, commit-prefix, or path rules matched, or all files were ignored; no model call |
 | `stale` | PR head or base changed and publication stopped |
-| `failed` | Configuration, API, model response, body budget, or publication failed; the Action fails and retains previous comments; publication failures may leave some new comments |
+| `failed` | Configuration, API, every started batch, aggregate body budget, or publication failed; the Action fails and retains previous comments; publication failures may leave some new comments |
+
+Token values include only responses whose usage block reports valid nonnegative integers for all three token fields. A missing value is unknown, not zero; partial reporting can produce nonempty totals with `usage_complete: false`. Request and character limits bound work, not token charges or currency cost. Inori does not estimate prices or enforce a monetary cap.
+
+### Batch review budgets
+
+The defaults keep the previous single-batch scope: `max_diff_chars` and `batch_diff_chars` are both `40000`. Increase the total budget to review more files in separate requests, for example in the trusted repository configuration:
+
+```yaml
+max_diff_chars: 120000
+batch_diff_chars: 40000
+max_requests: 6
+review_concurrency: 2
+```
+
+Both character budgets count the actual diff text, including file headers; the total also reserves separators between batches. Files that do not fit the per-batch or remaining total budget are omitted while later smaller files remain eligible. Files and hunks are never split. Retries and the `response_format` compatibility fallback, allowed once per batch, share the same request pool as initial calls. Once it is exhausted, pending batches are reported as unstarted; a batch that already made a request but cannot finish is failed. Already running requests may complete.
+
+Successful batch results are combined in batch order, with each summary limited to its listed files. Only identical inline `(path, line, body)` tuples and identical summary-list items are deduplicated; there is no second model call or semantic deduplication. Some successful batches can publish a `partial` review while retaining history. If no planned batch succeeds, the run fails without publishing. The aggregate summary still must fit `max_body_chars`.
 
 For example, read the result after the `id: review` step above. `if: always()` also runs this step after failures:
 
@@ -208,9 +237,9 @@ For example, read the result after the `id: review` step above. `if: always()` a
 ## How it works
 
 1. **Trusted snapshot and configuration**: Validate the event’s head/base SHA and load configuration from the fixed base SHA. Check the snapshot before and after fetching the diff and again before publishing. A changed snapshot stops the run, avoiding publication of current diff findings against an old commit.
-2. **Rules and budget**: Drafts, bots, specified authors, and configurable commit/path rules can skip review. Keep `ready_for_review` in your trigger types. The `max_diff_chars` budget admits complete file blocks; files that do not fit are omitted while later smaller files are still considered, without splitting hunks. The summary reports reviewed, ignored, budget-omitted, unavailable-patch, and API-missing file counts plus omission lists. GitHub’s file list returns at most 3000 files; differences from the PR’s total file count are reported as missing coverage. An unavailable patch is not a clean bill of health.
-3. **Response validation**: The prompt asks for real defects and accurate quotes and treats instructions inside diffs as untrusted data; these rules cannot guarantee resistance to prompt injection. Empty responses, invalid JSON, invalid field types, and explicitly unfinished responses fail instead of producing “no issues.” HTTP calls have timeouts and bounded retries; compatible endpoints that omit `finish_reason` still undergo body validation.
-4. **Complete delivery**: Findings on valid added lines become inline comments; others go into the summary. A body exceeding `max_body_chars` fails and preserves history instead of truncating findings. Failed inline findings are included in full in the summary; long delivery fallback content is split across summary reviews. Cleanup is considered only after every summary is published.
+2. **Rules and budget**: Drafts, bots, specified authors, and configurable commit/path rules can skip review. Keep `ready_for_review` in your trigger types. The total `max_diff_chars` and per-batch `batch_diff_chars` budgets admit complete file blocks; files that do not fit are omitted while later smaller files are still considered, without splitting hunks. The summary reports reviewed, ignored, budget-omitted, unavailable-patch, API-missing, failed-batch, and unstarted file counts plus omission lists. GitHub’s file list returns at most 3000 files; differences from the PR’s total file count are reported as missing coverage. An unavailable patch is not a clean bill of health.
+3. **Response validation**: The prompt asks for real defects and accurate quotes and treats instructions inside diffs as untrusted data; these rules cannot guarantee resistance to prompt injection. Empty responses, invalid JSON, invalid field types, and explicitly unfinished responses fail instead of producing “no issues.” HTTP calls have timeouts, bounded retries, and a shared per-run request limit; compatible endpoints that omit `finish_reason` still undergo body validation.
+4. **Complete delivery**: Findings on valid added lines become inline comments; others go into the summary. An aggregate body exceeding `max_body_chars` fails and preserves history instead of truncating findings. Failed inline findings are included in full in the summary; long delivery fallback content is split across summary reviews. Cleanup is considered only after every summary is published.
 5. **Re-reviews (`on_update`)**: Every run creates a new summary tied to its SHA and retains earlier summaries instead of updating them in place. Only complete coverage with successful inline and summary delivery permits cleanup of comments captured before publication and owned by the same publisher. `replace` deletes unreplied old comments; `resolve` resolves unreplied old threads; `keep` retains them. Incomplete coverage or inline fallback forces history preservation; discussions with human replies remain untouched. Cleanup failures produce warnings without discarding the new review.
 
 ### GitHub permissions for re-review cleanup

@@ -163,7 +163,10 @@ Inori 默认自动忽略以下常见非评审文件（无需在 `ignore_patterns
 | `ignore_patterns` | 逗号分隔的额外忽略 glob 规则（与内置规则合并） | — | — |
 | `paths_ignore` | 全部变更文件命中时**整体跳过**评审（纯 CI/文档类变更无代码语义）。与 `ignore_patterns`（仅从评审上下文剔除文件）语义正交。 | — | — |
 | `ignore_commit_prefixes` | 全部 commit 标识（subject 前缀）命中时**整体跳过**评审（Conventional Commits 语义：无代码变更）。混合任一非命中 commit 的 PR 照常评审。 | — | — |
-| `max_diff_chars` | Diff 硬字符预算；放不下的完整文件省略，继续尝试后续文件 | — | `40000` |
+| `max_diff_chars` | 整轮 Diff 总字符预算，含文件头与跨批次分隔符 | — | `40000` |
+| `batch_diff_chars` | 单批 Diff 字符预算，不超过总预算；不拆分文件或 hunk | — | `40000` |
+| `max_requests` | 整轮显式 LLM HTTP 请求数上限，含重试和 response-format 兼容回退 | — | `4` |
+| `review_concurrency` | 并发批次 worker 数，必须为 1 至 3 的整数 | — | `1` |
 | `max_body_chars` | 评审正文硬字符上限，含覆盖说明和标记；超限失败，不截断意见（最大 65536） | — | `60000` |
 | `custom_instructions` | 附加评审规则（团队规范、禁止调用的 API 等） | — | — |
 | `on_update` | Re-review 时旧评论处理方式：`replace`（删除旧评论） \| `resolve`（GraphQL 标记解决） \| `keep`（保留） | — | `replace` |
@@ -182,16 +185,42 @@ Inori 默认自动忽略以下常见非评审文件（无需在 `ignore_patterns
 | `head_sha` | 本轮对应的 PR head SHA |
 | `findings_count` | 已通过结构校验的发现数量；不等同于已发布数量 |
 | `reviewed_files` | 模型有效完成评审的文件数量；发布仍可能失败 |
-| `omitted_files` | 因预算、不可用 patch 或 API 限制遗漏的文件数量，不含按规则忽略的文件 |
+| `omitted_files` | 因 Diff/请求预算、不可用 patch、API 限制或批次失败遗漏的文件数量，不含按规则忽略的文件 |
 | `reason` | 运行状态的原因说明 |
+| `requests_used` | 已启动的显式 LLM HTTP 请求数，含重试和 response-format 回退，不计 fetch 内部跟随的重定向 |
+| `batches_completed` | 模型有效完成评审的批次数 |
+| `batches_failed` | 已启动但未获得有效评审的批次数 |
+| `batches_unstarted` | 因请求预算耗尽而未启动的批次数 |
+| `duration_ms` | 批次处理的实际耗时，含 worker 等待、重试与解析，不含 PR 拉取和发布 |
+| `prompt_tokens` | 端点报告的输入 token 累计；无可用 usage 时为空串 |
+| `completion_tokens` | 端点报告的输出 token 累计；无可用 usage 时为空串 |
+| `total_tokens` | 端点报告的总 token 累计；无可用 usage 时为空串 |
+| `usage_complete` | 至少启动一次请求且每次请求均报告有效 usage 时才为 `true`，否则为 `false` |
 
 | Status | 含义 |
 |---|---|
 | `completed` | 配置允许范围内的可用变更已评审，结果完整发布；检查 `findings_count` 判断是否有发现 |
-| `partial` | 有覆盖缺口，或 inline 发布失败但内容已保存在汇总；无任何可用 diff 时也可能没有发布评论 |
+| `partial` | 有覆盖缺口、部分批次失败或未启动，或 inline 发布失败但内容已保存在汇总；无任何可用 diff 时也可能没有发布评论 |
 | `skipped` | 命中草稿、作者、提交前缀、路径规则，或全部文件按规则忽略；不调用模型 |
 | `stale` | PR head 或 base 已变化，本轮停止发布 |
-| `failed` | 配置、API、模型响应、正文预算或发布失败；Action 标记失败，保留历史评论；发布过程中失败时可能已留下部分新评论 |
+| `failed` | 配置、API、所有已启动批次、聚合正文预算或发布失败；Action 标记失败，保留历史评论；发布过程中失败时可能已留下部分新评论 |
+
+Token 数只累计 usage 三个 token 字段均为有效非负整数的请求。缺失表示未知，不能当作零；部分请求报告用量时，累计值可能非空而 `usage_complete: false`。请求数与字符预算限制工作量，不等于 token 账单或金额上限；Inori 不估算价格，也不执行费用硬上限。
+
+### 分批评审预算
+
+默认 `max_diff_chars` 和 `batch_diff_chars` 均为 `40000`，保留原有单批评审范围。要分请求审查更多文件，可以在可信仓库配置中增大总预算，例如：
+
+```yaml
+max_diff_chars: 120000
+batch_diff_chars: 40000
+max_requests: 6
+review_concurrency: 2
+```
+
+两个字符预算均计实际 Diff 文本与文件头，总预算还预留跨批次分隔符。超出单批或剩余总预算的文件会被省略，继续考虑后续较小文件；不拆分文件或 hunk。重试、每批最多一次的 `response_format` 兼容回退和首次请求共用同一请求池。耗尽后等待中的批次记为未启动；已发过请求但无法完成的批次记为失败，正在执行的请求仍可完成。
+
+成功结果按批次顺序合并，每条汇总结论只适用于该批列出的文件。仅对完全相同的 inline `(path, line, body)` 和相同汇总条目去重，不再调用模型汇总，也不做语义去重。部分批次成功时可以发布 `partial` 结果并保留历史；计划批次全部失败时不发布，运行失败。聚合汇总仍须满足 `max_body_chars`。
 
 例如，在上面 `id: review` 的步骤后读取状态；`if: always()` 使失败后的步骤也能运行：
 
@@ -208,9 +237,9 @@ Inori 默认自动忽略以下常见非评审文件（无需在 `ignore_patterns
 ## 工作原理
 
 1. **可信快照与配置**：校验事件中的 head/base SHA，从固定 base SHA 读取配置；拉取 diff 前后和发布前再次核对快照。检测到变化就停止，避免把当前 diff 结果发布到旧提交。
-2. **规则与预算**：草稿、机器人、指定作者和可配置的提交/路径规则可以跳过评审。请在触发事件中保留 `ready_for_review`。Diff 以完整文件块纳入 `max_diff_chars`；放不下的文件略过，继续尝试后续较小文件，不拆分 hunk。汇总披露已评审、忽略、预算省略、无可用 patch 和 API 未返回的文件数量，以及省略文件清单。GitHub 文件列表最多返回 3000 个文件，超过时按 PR 文件总数记录缺口；“无 patch”不等于“没有问题”。
-3. **响应校验**：Prompt 要求只报告真实缺陷、准确引用代码，并把 diff 中的指令视为不可信数据；这些约束不能保证模型完全抵抗提示注入。空响应、非法 JSON、错误字段类型、明确未完成的模型响应均失败，不会产生“未发现问题”。HTTP 请求有超时和有限重试；兼容端点省略 `finish_reason` 时仍会校验正文结构。
-4. **发布完整性**：合法新增行上的发现发布为 inline，其他发现进入汇总。正文超过 `max_body_chars` 直接失败，保留历史，不裁剪意见。inline 失败时将完整发现补入汇总；过长的发布兜底内容分成多条汇总，只有全部汇总发布成功后才考虑清理旧评论。
+2. **规则与预算**：草稿、机器人、指定作者和可配置的提交/路径规则可以跳过评审。请在触发事件中保留 `ready_for_review`。Diff 以完整文件块纳入总预算 `max_diff_chars` 和单批预算 `batch_diff_chars`；放不下的文件略过，继续尝试后续较小文件，不拆分 hunk。汇总披露已评审、忽略、预算省略、无可用 patch、API 未返回、批次失败和未启动的文件数量，以及省略文件清单。GitHub 文件列表最多返回 3000 个文件，超过时按 PR 文件总数记录缺口；“无 patch”不等于“没有问题”。
+3. **响应校验**：Prompt 要求只报告真实缺陷、准确引用代码，并把 diff 中的指令视为不可信数据；这些约束不能保证模型完全抵抗提示注入。空响应、非法 JSON、错误字段类型、明确未完成的模型响应均失败，不会产生“未发现问题”。HTTP 请求有超时、有限重试和整轮共享请求数上限；兼容端点省略 `finish_reason` 时仍会校验正文结构。
+4. **发布完整性**：合法新增行上的发现发布为 inline，其他发现进入汇总。聚合正文超过 `max_body_chars` 直接失败，保留历史，不裁剪意见。inline 失败时将完整发现补入汇总；过长的发布兜底内容分成多条汇总，只有全部汇总发布成功后才考虑清理旧评论。
 5. **多轮评审（`on_update`）**：每轮都创建关联当前 SHA 的新汇总，旧汇总保留，不再就地修改。只有本轮覆盖完整、inline 和汇总都发布成功，才处理发布前快照中属于同一发布者的旧行内评论。`replace` 删除未回复的旧评论；`resolve` 解决未回复的旧线程；`keep` 保留。覆盖不完整或 inline 降级时强制保留历史；人工回复过的讨论不清理。清理失败只记录警告，不抹去已发布的新结果。
 
 ### Re-review 清理所需的 GitHub 权限
