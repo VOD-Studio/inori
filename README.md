@@ -14,10 +14,13 @@ Inori reviews your PR diff and posts findings as **inline comments anchored to r
 - **Actionable Coding Plan.** Generates clear, step-by-step fix recommendations and code replacement snippets whenever a defect is found, rendered cleanly in PR comments.
 - **Inline comments on real lines.** Every comment's line number is validated against the actual diff before posting; comments that don't land on a real added line fall back to the summary instead of dangling.
 - **Review discipline & convergence.** Built-in strict review constraints prevent LLMs from degenerating into "defensive exhaustion" during multi-round re-reviews — focuses on real defects, bans unprompted defensive boilerplate suggestions, mandates verbatim quoting, and calibrates severities objectively.
-- **Smart re-reviews (`on_update`).** Configurable handling of previous review comments (`replace` to delete stale ones, `resolve` to automatically resolve threads via GraphQL, or `keep` to retain history) without messy duplicate stacking.
-- **Smart early exit & safety.** Automatically skips draft PRs, bot PRs (accounts with the official `*[bot]` login suffix or `type: Bot`, e.g. `dependabot[bot]`, `renovate[bot]`), and empty diffs to eliminate wasted API calls. Diffs are safely truncated on file boundaries to prevent LLM hallucinations from split code blocks.
-- **Repository configuration (`.github/inori.yml`).** Manage review settings, ignore rules, provider preferences, and team coding guidelines directly in your codebase with version control.
+- **Preserved review records.** Each run creates a summary tied to its commit. Previous inline comments are cleaned up according to `on_update` only after complete delivery; failed or incomplete reviews preserve earlier findings.
+- **Visible coverage.** A strict diff character budget includes whole files and reports omissions, unavailable patches, and API file gaps. Action outputs and the job summary distinguish completed, partial, skipped, stale, and failed runs.
+- **Trusted repository configuration (`.github/inori.yml`).** Review settings, provider preferences, and team rules are read from the event’s fixed base SHA, without checking out PR code.
+
 ## Quick start
+
+> **Pending release:** The changes described here are not yet available through the published `@v0`. Checkout-free execution, trusted base-SHA configuration, and the new outputs take effect after a later Release updates `@v0`. Until then, retain an `actions/checkout` step when using repository configuration with the currently published version; the example below describes the upcoming behavior.
 
 1. Add your LLM API key as a repository secret (e.g. `DEEPSEEK_API_KEY`) under **Settings → Secrets and variables → Actions**.
 
@@ -43,14 +46,16 @@ jobs:
   review:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
       - uses: VOD-Studio/inori@v0
+        id: review
         with:
           provider: deepseek             # Auto-detects endpoint & model; or pass `llm_model: gpt-4o`, etc.
           llm_api_key: ${{ secrets.DEEPSEEK_API_KEY }}
 ```
 
 3. Open a PR. Inori reviews it automatically.
+
+No `actions/checkout` is needed: Inori reads the diff and base-SHA configuration through the GitHub API, so `contents: read` is still required. Ordinary fork PRs generally cannot access repository secrets and have a read-only workflow token. This example assumes a PR execution context with the required credentials and write permission; it does not implement privileged fork reviews.
 
 > **Switching providers is effortless** — no endpoint URL lookup needed:
 > - **DeepSeek**: `provider: deepseek` (or `llm_model: deepseek-v4-flash`)
@@ -131,9 +136,14 @@ custom_instructions: |
 
 **Precedence**: Action workflow inputs (`with:`) > `.github/inori.yml` > Built-in defaults.
 
+Configuration is read from the PR event’s `base.sha`, trying `.github/inori.yml` first and `.github/inori.yaml` only when the former is absent. The checked-out workspace is never read: PR configuration changes take effect after merging, when a later base SHA includes them. If neither file exists, defaults apply; empty or comment-only files also allow defaults. Read errors, malformed YAML, invalid field types, and invalid enum values fail the run instead of silently falling back. Character budgets must be positive integers, and `max_body_chars` must not exceed `65536`.
+
+Keys are selected from `llm_api_key`, the resolved provider’s environment variable, then `LLM_API_KEY`. Only the default DeepSeek route may use the default `DEEPSEEK_API_KEY`; custom endpoints without a resolved provider require explicit `llm_api_key` or `LLM_API_KEY`, with no fallback to another provider’s credentials. A custom proxy with a specified provider may still use that provider’s environment key.
+
 ### Built-in Ignored Files
 
 Inori automatically ignores common non-reviewable files by default (no need to repeat them in `ignore_patterns`):
+
 - **Lockfiles**: `pnpm-lock.yaml`, `package-lock.json`, `yarn.lock`, `go.sum`, `Cargo.lock`, `poetry.lock`, `composer.lock`
 - **Minified code & maps**: `*.min.js`, `*.min.css`, `*.map`
 - **Vector assets**: `*.svg`
@@ -148,34 +158,64 @@ Inori automatically ignores common non-reviewable files by default (no need to r
 | `llm_endpoint` | Custom OpenAI-compatible API base URL (optional, auto-inferred when omitted) | — | Auto-inferred |
 | `llm_api_key` | API key for the LLM provider | ✅ | — |
 | `coding_plan` | Whether to generate actionable fix steps and code suggestions for issues | — | `true` |
-| `github_token` | GitHub token with `pull-requests:write`; `resolve` additionally requires `contents:write` due to GitHub GraphQL permission mapping. Defaults to the workflow token. | — | `${{ github.token }}` |
+| `github_token` | GitHub token with `contents:read` and `pull-requests:write`; `resolve` additionally requires `contents:write` due to GitHub GraphQL permission mapping. Defaults to the workflow token. | — | `${{ github.token }}` |
 | `language` | Output language for review comments: `zh` \| `en` | — | `zh` |
 | `ignore_patterns` | Comma-separated globs of extra files to skip (in addition to built-in ignore rules) | — | — |
 | `paths_ignore` | Globs; when **all** changed files in a push match, the review is skipped entirely (pure CI/docs-only changes). Unlike `ignore_patterns`, which only removes files from the review context. | — | — |
 | `ignore_commit_prefixes` | Commit subject prefixes; when **all** commits in the PR match, skip the review (Conventional Commits semantics: no code change). Mixed PRs are still reviewed. | — | — |
-| `max_diff_chars` | Character limit before diff is safely truncated at file boundaries | — | `40000` |
-| `max_body_chars` | Character limit for the review body (GitHub caps at 65536) | — | `60000` |
+| `max_diff_chars` | Hard diff character budget; omit whole files that do not fit and try subsequent files | — | `40000` |
+| `max_body_chars` | Hard review-body character limit including coverage and marker; exceeding it fails instead of truncating findings (maximum 65536) | — | `60000` |
 | `custom_instructions` | Extra review rules appended to the prompt (team conventions, banned APIs, etc.) | — | — |
 | `on_update` | How to handle previous comments on re-review: `replace` (delete old), `resolve` (resolve threads via GraphQL), `keep` | — | `replace` |
 | `skip_draft` | Skip review when PR is in draft status | — | `true` |
 | `ignore_bots` | Skip review for bot-created PRs (official bot accounts: `*[bot]` login suffix or `type: Bot`; other automation accounts → `ignore_authors`) | — | `true` |
 | `ignore_authors` | Comma-separated PR author usernames to skip | — | — |
 | `keep_previous_comments` | Legacy switch: whether to keep previous comments (alias for `on_update: keep`) | — | `false` |
+
+## Outputs and run status
+
+Every run attempts to write the following Action outputs and a GitHub Actions job summary. `completed` means the process completed, **not that there were no findings**. Inori continues to submit COMMENT reviews; it does not approve PRs, request changes, or enforce a severity gate.
+
+| Output | Meaning |
+|---|---|
+| `status` | `completed` / `partial` / `skipped` / `stale` / `failed`, defined below |
+| `head_sha` | PR head SHA associated with this run |
+| `findings_count` | Number of structurally validated findings, not necessarily the number published |
+| `reviewed_files` | Number of files covered by a valid completed model response; publication can still fail |
+| `omitted_files` | Files omitted by budget, unavailable patches, or API limits; excludes files ignored by rules |
+| `reason` | Explanation of the run status |
+
+| Status | Meaning |
+|---|---|
+| `completed` | Available changes within the configured scope were reviewed and delivered completely; inspect `findings_count` for findings |
+| `partial` | Coverage is incomplete, or inline delivery fell back to the summary; when no diff is available, no review comment may have been published |
+| `skipped` | Draft, author, commit-prefix, or path rules matched, or all files were ignored; no model call |
+| `stale` | PR head or base changed and publication stopped |
+| `failed` | Configuration, API, model response, body budget, or publication failed; the Action fails and retains previous comments; publication failures may leave some new comments |
+
+For example, read the result after the `id: review` step above. `if: always()` also runs this step after failures:
+
+```yaml
+      - name: Inspect review outcome
+        if: always()
+        env:
+          REVIEW_STATUS: ${{ steps.review.outputs.status }}
+          REVIEW_FINDINGS: ${{ steps.review.outputs.findings_count }}
+          REVIEW_OMITTED: ${{ steps.review.outputs.omitted_files }}
+        run: printf 'status=%s findings=%s omitted=%s\n' "$REVIEW_STATUS" "$REVIEW_FINDINGS" "$REVIEW_OMITTED"
+```
+
 ## How it works
 
-1. **Smart early exits**: Evaluates PR metadata to skip execution for drafts (`skip_draft: true`), bot PRs (`ignore_bots: true`), or designated authors (`ignore_authors`), saving API budget. Add `ready_for_review` to your `pull_request` trigger types so draft PRs get reviewed once marked ready.
-2. **Safe diff preprocessing**: Changed files are filtered against built-in and custom ignore patterns. When the total diff exceeds `max_diff_chars`, truncation cuts at clean per-file boundaries to preserve syntactic integrity and prevent LLM syntax hallucinations. If all changes are ignored (diff is empty), the action exits cleanly.
-3. **Prompt discipline & injection safety**: The prompt enforces four strict review disciplines (strict bar for reporting, explicit exclusion of defensive over-engineering, verbatim quoting verification, and objective severity calibration) alongside anti-injection defenses.
-4. **Inline validation**: Findings with valid line numbers matching `+` added diff lines are posted as inline comments; invalid anchors safely fall back to the summary.
-5. **Re-review lifecycle (`on_update`)**:
-   - `replace` (default): Stale Inori inline comments are deleted (threads with user replies are always preserved) and summary is updated in place.
-   - `resolve`: Stale Inori review threads are marked as **Resolved** via the GitHub GraphQL API, keeping a clean view while preserving audit history.
-   - `keep`: Stale inline comments are left intact on the diff (the summary review is still updated in place).
-
+1. **Trusted snapshot and configuration**: Validate the event’s head/base SHA and load configuration from the fixed base SHA. Check the snapshot before and after fetching the diff and again before publishing. A changed snapshot stops the run, avoiding publication of current diff findings against an old commit.
+2. **Rules and budget**: Drafts, bots, specified authors, and configurable commit/path rules can skip review. Keep `ready_for_review` in your trigger types. The `max_diff_chars` budget admits complete file blocks; files that do not fit are omitted while later smaller files are still considered, without splitting hunks. The summary reports reviewed, ignored, budget-omitted, unavailable-patch, and API-missing file counts plus omission lists. GitHub’s file list returns at most 3000 files; differences from the PR’s total file count are reported as missing coverage. An unavailable patch is not a clean bill of health.
+3. **Response validation**: The prompt asks for real defects and accurate quotes and treats instructions inside diffs as untrusted data; these rules cannot guarantee resistance to prompt injection. Empty responses, invalid JSON, invalid field types, and explicitly unfinished responses fail instead of producing “no issues.” HTTP calls have timeouts and bounded retries; compatible endpoints that omit `finish_reason` still undergo body validation.
+4. **Complete delivery**: Findings on valid added lines become inline comments; others go into the summary. A body exceeding `max_body_chars` fails and preserves history instead of truncating findings. Failed inline findings are included in full in the summary; long delivery fallback content is split across summary reviews. Cleanup is considered only after every summary is published.
+5. **Re-reviews (`on_update`)**: Every run creates a new summary tied to its SHA and retains earlier summaries instead of updating them in place. Only complete coverage with successful inline and summary delivery permits cleanup of comments captured before publication and owned by the same publisher. `replace` deletes unreplied old comments; `resolve` resolves unreplied old threads; `keep` retains them. Incomplete coverage or inline fallback forces history preservation; discussions with human replies remain untouched. Cleanup failures produce warnings without discarding the new review.
 
 ### GitHub permissions for re-review cleanup
 
-The default workflow permissions are sufficient for publishing reviews:
+Reading trusted configuration and publishing reviews requires:
 
 ```yaml
 permissions:
@@ -191,12 +231,20 @@ permissions:
   pull-requests: write
 ```
 
-`contents: write` allows the workflow token to push repository contents. Use `resolve` only when retaining Resolved thread history is important. Otherwise, prefer the default `replace`, which uses the REST API to delete stale Inori comments and only needs `pull-requests: write`. Use a repository-scoped GitHub App token rather than a broad personal token when `resolve` is required. If cleanup cannot resolve a thread, Inori logs a warning and continues publishing the current review; the job can still succeed.
+`contents: write` allows the workflow token to push repository contents. Use `resolve` only when retaining Resolved thread history is important. Otherwise, prefer the default `replace`, whose deletion operation only needs `pull-requests: write`; reading trusted configuration still requires `contents: read`. Use a repository-scoped GitHub App token rather than a broad personal token when `resolve` is required. Cleanup happens after publishing the new review; failures produce warnings and the job can still succeed.
 
 This GitHub permission behavior is documented in [GitHub Community Discussion #204269](https://github.com/orgs/community/discussions/204269).
+
+## Development and releases
+
+CI reuses `verify.yml` for lint, type checking, tests, build, and dist consistency. Release candidates are verified at the merged release PR’s fixed SHA before publication. Existing-release major-tag recovery has a separate verification path; a historical recovery failure does not block new candidate publication. Release PR maintenance runs independently. All three paths are restricted to main, with write permissions scoped to each job.
+
+Major tags only advance to a SHA verified by the relevant path; other targets, including concurrent new releases, are skipped with a warning for a later run. Repository branch protection, required checks, and squash-only merging still require administrator configuration; these workflows do not set them. See the [project roadmap](docs/ROADMAP.md) for design decisions and future work.
+
 ## Data privacy
 
 The PR diff is sent **as-is** to the LLM endpoint you configure. No third party beyond your chosen LLM provider sees your code. Review the data-handling practices of your provider before enabling Inori on private repositories.
+
 ## License
 
 [MIT](LICENSE)

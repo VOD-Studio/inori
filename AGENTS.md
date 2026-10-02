@@ -9,7 +9,7 @@ TypeScript 单包项目，`@vercel/ncc` 打包为自包含的 `dist/index.js`。
 - **`src/core/`** 纯逻辑：diff 处理、prompt 构造、评审解析、跳过判定。零 `@actions/core` 依赖，可被 vitest 直接 import。
 - **`src/github/`** GitHub API 适配：diff 拉取、分页、评审发布。
 - **`src/llm/`** provider 预设（`providers.ts`）与 LLM 调用。
-- **`src/index.ts`** 仅 IO 编排，业务逻辑全部下沉到上述模块。
+- **`src/index.ts`** 仅启动入口；**`src/run.ts`** 编排可信配置、快照校验、评审发布与运行状态，业务逻辑下沉到上述模块。
 
 原则：**纯逻辑不 import `@actions/core`**——测试必须 import 真实源码而非复制逻辑，
 复制时偷偷加的守护会让真实代码失去保护（历史上 null 元素崩溃 bug 因此潜伏）。
@@ -104,11 +104,24 @@ type 对齐 Conventional Commits（feat/fix/chore/docs/refactor/style/test/perf/
 
 ### 发版流程（release-please）
 
-push 到 main → release-please 自动开「release PR」（含 CHANGELOG、版本号、
-manifest）→ review 后 squash 合并 → 自动打 `v*` tag、创建 GitHub Release 并
-移动 major 浮动 tag（v0.2.0 → v0，用户可 `@v0` 引用）。tag/Release/浮动 tag
-全部由 release-please.yml 一个 workflow 收口（GITHUB_TOKEN 创建的 ref 不触发
-其他 workflow，独立 tag 监听收不到事件）。
+- 本轮后续 release PR 审查时核对双语 README 的「尚未发布 / Pending release」提示；在对应 Release 更新 `@v0` 时同步更新或移除，避免提示过期。
+
+push 到 main 后，三个 main-only 链路独立运行：
+
+- `plan → verify → publish`：只验证已合并 release PR 的固定 `merge_commit_sha`；
+  pending/verified 候选整批通过后复核并加 `autorelease: verified`，再 release-only 发布。
+- `recovery-plan → verify-recovery → recover`：仅验证 major 标签缺失或未对齐的最新正式
+  Release 的历史 SHA，独立恢复标签；历史恢复失败不阻断新候选发布。
+- `maintain`：独立 PR-only 调用维护 release PR，不依赖发布或恢复成功。
+
+`release-please-config.json` 负责 PR，`release-please-release-config.json` 负责已验证候选；
+不要合并回不经 SHA 验证的单次调用。`publish` 与 `recover` 必须各自验证成功才执行，
+空矩阵跳过。版本号和 CHANGELOG 仍由 release-please 维护，写权限按各 job 实际需要授予。
+
+major tag 对齐由 `scripts/release-gate.mjs` 完成，只推进本链路已验证的 SHA；其他目标或
+并发新 Release 跳过并告警。重跑可恢复已存在 Release 的 major tag，禁止回退或跨分叉。
+tag/Release/浮动 tag 全由 `release-please.yml` 收口，不依赖 `GITHUB_TOKEN` 创建 ref 后
+再次触发其他 workflow。
 
 - 发版型 commit（feat/fix/perf/refactor）触发新版本；docs/ci/chore 不触发。
 - 版本号从 commit 类型推导（feat → minor，fix → patch）；需锁定时在发版型
@@ -118,6 +131,6 @@ manifest）→ review 后 squash 合并 → 自动打 `v*` tag、创建 GitHub R
 
 ### CI 与 AI 评审
 
-- `ci.yml`：lint → typecheck → test → build → dist 一致性校验，任一失败阻断合并。
+- `ci.yml` 调用 `verify.yml`：lint → typecheck → test → build → dist 一致性校验；发布也复用它验证准确 SHA。失败会标红，实际阻断合并仍需远端 main 保护和必需检查配置。依赖审计暂为 advisory。
 - `ai-review.yml`：本仓库自 dogfood——用 inori 评审 inori 的 PR（`@main`），
   辅助人工 review，非门禁。需在 Settings → Secrets 配置 `DEEPSEEK_API_KEY`。

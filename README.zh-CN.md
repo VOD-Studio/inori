@@ -14,11 +14,13 @@ Inori 会分析 PR 的代码变更（diff），并将评审意见以**精准锚�
 - **落地可执行的修复计划（Coding Plan）**：审查发现问题时，自动生成结构化、步骤清晰的修复计划与代码重构建议，在 PR 中优雅高亮展示，开发者可直接参考采纳。
 - **精准锚定真实变更行**：每条 Inline 评论在发布前都会比对 PR 实际 diff 中的新增行（`+` 行），行号不合法的意见自动降级放入总结报告，杜绝悬空评论。
 - **收口纪律与防发散机制**：内置严格的评审纪律（够格标准、明确排除防御性穷举与教程化建议、逐字核对引文、客观校准严重度），彻底解决多轮 Re-review 模型陷入低价值挑刺和防御性穷举的问题。
-- **智能 Re-review 生命周期管理（`on_update`）**：支持灵活配置旧评审的处理方式 —— `replace`（清理旧评论重新发布）、`resolve`（通过 GraphQL 将旧评审线程标记为 Resolved 已解决）、`keep`（保留历史记录），告别红点堆叠。
-- **智能早退与安全截断**：自动识别并跳过草稿 PR（`skip_draft`）、机器人 PR（`ignore_bots`，官方 Bot 账号即登录名带 `*[bot]` 后缀或账号类型为 `type: Bot`，如 `dependabot[bot]`、`renovate[bot]`）及空变更，节省 API 预算；超长 Diff 按文件块边界安全截断，防止半截代码引发语法幻觉。
-- **支持仓库级配置文件（`.github/inori.yml`）**：支持在仓库中通过 YAML 文件对团队编码规范、提供商偏好和评审要求进行版本化管理，保持 Workflow 极简。
+- **保留可信评审记录**：每轮评审关联固定提交并新增汇总；新结果完整发布后再按 `on_update` 清理旧行内评论。失败或覆盖不完整时保留旧意见。
+- **可见的评审范围**：按文件执行严格 Diff 字符预算，披露省略文件、不可用 patch 和 API 文件缺口；通过 Action outputs 与运行摘要区分完成、部分覆盖、跳过、过期和失败。
+- **可信仓库配置（`.github/inori.yml`）**：从 PR 事件的固定 base SHA 读取团队规范、提供商偏好与评审设置，无需 checkout PR 代码。
 
 ## 快速开始
+
+> **尚未发布：** 本轮改动尚未包含在已发布的 `@v0` 中。无需 checkout、可信 base SHA 配置和新 outputs 将在后续 Release 更新 `@v0` 后生效。在此之前，使用当前已发布版且需要仓库配置时，请保留 `actions/checkout` 步骤；以下示例描述的是即将发布的行为。
 
 1. 在仓库的 **Settings → Secrets and variables → Actions** 中添加你的大模型 API 密钥（如 `DEEPSEEK_API_KEY`）。
 
@@ -44,14 +46,16 @@ jobs:
   review:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
       - uses: VOD-Studio/inori@v0
+        id: review
         with:
           provider: deepseek             # 自动识别端点与模型；也可传 `llm_model: gpt-4o` 等
           llm_api_key: ${{ secrets.DEEPSEEK_API_KEY }}
 ```
 
 3. 提交 PR，Inori 将会自动执行代码审查并发表意见。
+
+无需 `actions/checkout`：Inori 通过 GitHub API 读取 diff 和 base SHA 上的配置，因此仍需 `contents: read`。普通 fork PR 通常拿不到仓库 secrets，工作流 token 也没有评论写权限；以上示例适用于拥有这些权限和凭据的 PR 运行环境，不包含 fork 的特权评审方案。
 
 > **切换大模型服务商极简** —— 无需手动查填 URL：
 > - **DeepSeek**：`provider: deepseek`（或 `llm_model: deepseek-v4-flash`）
@@ -132,9 +136,14 @@ custom_instructions: |
 
 **配置优先级**：Action Workflow 输入参数（`with:`） > `.github/inori.yml` > 内置默认值。
 
+配置从 PR 事件记录的 `base.sha` 读取，优先 `.github/inori.yml`，不存在时才尝试 `.github/inori.yaml`。不读取 checkout 工作区：PR 中修改的配置需要合并后，才能由包含该提交的后续 base SHA 使用。两个文件都不存在时使用默认值；空文件或仅注释文件也允许使用默认值。读取失败、非法 YAML、错误字段类型或非法枚举会使运行失败，不静默回退。字符预算必须为正整数，`max_body_chars` 不能超过 `65536`。
+
+密钥来源依次为 `llm_api_key`、已确定 provider 的专属环境变量、`LLM_API_KEY`。只有默认 DeepSeek 路由可使用默认 `DEEPSEEK_API_KEY`；未确定 provider 的自定义端点需要显式 `llm_api_key` 或 `LLM_API_KEY`，不会把其他 provider 的密钥作为兜底发送。指定 provider 的自定义代理仍可使用该 provider 专属环境密钥。
+
 ### 默认内置忽略文件
 
 Inori 默认自动忽略以下常见非评审文件（无需在 `ignore_patterns` 中重复配置）：
+
 - **包管理锁文件**：`pnpm-lock.yaml`, `package-lock.json`, `yarn.lock`, `go.sum`, `Cargo.lock`, `poetry.lock`, `composer.lock`
 - **压缩产物与 SourceMap**：`*.min.js`, `*.min.css`, `*.map`
 - **矢量资源**：`*.svg`
@@ -149,13 +158,13 @@ Inori 默认自动忽略以下常见非评审文件（无需在 `ignore_patterns
 | `llm_endpoint` | 自定义 OpenAI 兼容接口 Base URL（可选，不传则自动推断） | — | 自动推断 |
 | `llm_api_key` | 大模型 API 密钥 | ✅ | — |
 | `coding_plan` | 是否在评审中生成具体的代码修复计划 (Coding Plan) 与实施步骤 | — | `true` |
-| `github_token` | 具有 `pull-requests:write` 权限的 GitHub Token；使用 `resolve` 时还需要 `contents:write`（GitHub GraphQL 权限映射限制）。默认使用 Workflow Token。 | — | `${{ github.token }}` |
+| `github_token` | 具有 `contents:read` 和 `pull-requests:write` 权限的 GitHub Token；使用 `resolve` 时还需要 `contents:write`（GitHub GraphQL 权限映射限制）。默认使用 Workflow Token。 | — | `${{ github.token }}` |
 | `language` | 评审意见输出语言：`zh` \| `en` | — | `zh` |
 | `ignore_patterns` | 逗号分隔的额外忽略 glob 规则（与内置规则合并） | — | — |
 | `paths_ignore` | 全部变更文件命中时**整体跳过**评审（纯 CI/文档类变更无代码语义）。与 `ignore_patterns`（仅从评审上下文剔除文件）语义正交。 | — | — |
 | `ignore_commit_prefixes` | 全部 commit 标识（subject 前缀）命中时**整体跳过**评审（Conventional Commits 语义：无代码变更）。混合任一非命中 commit 的 PR 照常评审。 | — | — |
-| `max_diff_chars` | Diff 字符数上限，超出将在文件块边界安全截断 | — | `40000` |
-| `max_body_chars` | 评审 Summary 字符数上限（GitHub API 单条上限 65536） | — | `60000` |
+| `max_diff_chars` | Diff 硬字符预算；放不下的完整文件省略，继续尝试后续文件 | — | `40000` |
+| `max_body_chars` | 评审正文硬字符上限，含覆盖说明和标记；超限失败，不截断意见（最大 65536） | — | `60000` |
 | `custom_instructions` | 附加评审规则（团队规范、禁止调用的 API 等） | — | — |
 | `on_update` | Re-review 时旧评论处理方式：`replace`（删除旧评论） \| `resolve`（GraphQL 标记解决） \| `keep`（保留） | — | `replace` |
 | `skip_draft` | 草稿 PR 是否跳过评审 | — | `true` |
@@ -163,21 +172,50 @@ Inori 默认自动忽略以下常见非评审文件（无需在 `ignore_patterns
 | `ignore_authors` | 逗号分隔的跳过评审的作者用户名列表 | — | — |
 | `keep_previous_comments` | 兼容旧版开关：设为 true 保留旧评论（等同于 `on_update: keep`） | — | `false` |
 
+## 输出与运行状态
+
+所有运行都会尝试写入以下 Action outputs 和 GitHub Actions 运行摘要。`completed` 表示流程完成，**不表示没有发现问题**；Inori 继续发布 COMMENT 评审，不自动批准、拒绝合并或按严重度设置门禁。
+
+| Output | 含义 |
+|---|---|
+| `status` | `completed` / `partial` / `skipped` / `stale` / `failed`，定义见下表 |
+| `head_sha` | 本轮对应的 PR head SHA |
+| `findings_count` | 已通过结构校验的发现数量；不等同于已发布数量 |
+| `reviewed_files` | 模型有效完成评审的文件数量；发布仍可能失败 |
+| `omitted_files` | 因预算、不可用 patch 或 API 限制遗漏的文件数量，不含按规则忽略的文件 |
+| `reason` | 运行状态的原因说明 |
+
+| Status | 含义 |
+|---|---|
+| `completed` | 配置允许范围内的可用变更已评审，结果完整发布；检查 `findings_count` 判断是否有发现 |
+| `partial` | 有覆盖缺口，或 inline 发布失败但内容已保存在汇总；无任何可用 diff 时也可能没有发布评论 |
+| `skipped` | 命中草稿、作者、提交前缀、路径规则，或全部文件按规则忽略；不调用模型 |
+| `stale` | PR head 或 base 已变化，本轮停止发布 |
+| `failed` | 配置、API、模型响应、正文预算或发布失败；Action 标记失败，保留历史评论；发布过程中失败时可能已留下部分新评论 |
+
+例如，在上面 `id: review` 的步骤后读取状态；`if: always()` 使失败后的步骤也能运行：
+
+```yaml
+      - name: Inspect review outcome
+        if: always()
+        env:
+          REVIEW_STATUS: ${{ steps.review.outputs.status }}
+          REVIEW_FINDINGS: ${{ steps.review.outputs.findings_count }}
+          REVIEW_OMITTED: ${{ steps.review.outputs.omitted_files }}
+        run: printf 'status=%s findings=%s omitted=%s\n' "$REVIEW_STATUS" "$REVIEW_FINDINGS" "$REVIEW_OMITTED"
+```
+
 ## 工作原理
 
-1. **智能早退判定**：在执行前检查 PR 状态，若命中草稿 PR（`skip_draft`）、机器人 PR（`ignore_bots`）或指定作者名单（`ignore_authors`），直接早退不消耗 Token。请在触发事件的 `types` 中包含 `ready_for_review`，使草稿 PR 标记「准备好评」后自动触发评审。
-2. **Diff 预处理与安全截断**：获取 PR 变更文件并应用内置与自定义忽略规则。当 Diff 总长度超出 `max_diff_chars` 时，回退到上一个完整文件块边界截断，保证每个送审文件的语法结构完整，杜绝半截括号等导致的幻觉。若过滤后无有效变更，则正常退出。
-3. **结构化 Prompt 与纪律约束**：Prompt 内置系统防注入保护，并施加四条严格纪律（够格标准、明确排除防御性补全、引文逐字核对、严重度客观校准），引导模型聚焦高价值缺陷。
-4. **行号合法性校验**：模型输出的评审意见如果对应目标文件真实的新增行（`+` 行），则发布为行内评论（Inline Comment）；行号无法匹配的意见自动汇总到 Summary。
-5. **多轮评审生命周期（`on_update`）**：
-   - `replace`（默认）：清理上一轮 inori 的未回复行内评论，并在原评审上就地更新 Summary。
-   - `resolve`：通过 GitHub GraphQL API 将上一轮未回复的评审线程标记为 **Resolved**（已解决），GitHub 会折叠隐藏旧意见，保持页面清爽同时保留修复轨迹。
-   - `keep`：不作处理，保留全部历史行内评论（Summary 仍在原评审上就地更新）。
-
+1. **可信快照与配置**：校验事件中的 head/base SHA，从固定 base SHA 读取配置；拉取 diff 前后和发布前再次核对快照。检测到变化就停止，避免把当前 diff 结果发布到旧提交。
+2. **规则与预算**：草稿、机器人、指定作者和可配置的提交/路径规则可以跳过评审。请在触发事件中保留 `ready_for_review`。Diff 以完整文件块纳入 `max_diff_chars`；放不下的文件略过，继续尝试后续较小文件，不拆分 hunk。汇总披露已评审、忽略、预算省略、无可用 patch 和 API 未返回的文件数量，以及省略文件清单。GitHub 文件列表最多返回 3000 个文件，超过时按 PR 文件总数记录缺口；“无 patch”不等于“没有问题”。
+3. **响应校验**：Prompt 要求只报告真实缺陷、准确引用代码，并把 diff 中的指令视为不可信数据；这些约束不能保证模型完全抵抗提示注入。空响应、非法 JSON、错误字段类型、明确未完成的模型响应均失败，不会产生“未发现问题”。HTTP 请求有超时和有限重试；兼容端点省略 `finish_reason` 时仍会校验正文结构。
+4. **发布完整性**：合法新增行上的发现发布为 inline，其他发现进入汇总。正文超过 `max_body_chars` 直接失败，保留历史，不裁剪意见。inline 失败时将完整发现补入汇总；过长的发布兜底内容分成多条汇总，只有全部汇总发布成功后才考虑清理旧评论。
+5. **多轮评审（`on_update`）**：每轮都创建关联当前 SHA 的新汇总，旧汇总保留，不再就地修改。只有本轮覆盖完整、inline 和汇总都发布成功，才处理发布前快照中属于同一发布者的旧行内评论。`replace` 删除未回复的旧评论；`resolve` 解决未回复的旧线程；`keep` 保留。覆盖不完整或 inline 降级时强制保留历史；人工回复过的讨论不清理。清理失败只记录警告，不抹去已发布的新结果。
 
 ### Re-review 清理所需的 GitHub 权限
 
-默认 Workflow 权限足以发布评审：
+读取可信配置和发布评审需要：
 
 ```yaml
 permissions:
@@ -193,9 +231,16 @@ permissions:
   pull-requests: write
 ```
 
-`contents: write` 允许 Workflow Token 向仓库推送内容。只有确实需要保留 Resolved 线程历史时才建议使用 `resolve`；否则优先使用默认的 `replace`。`replace` 通过 REST API 删除过期的 Inori 评论，只需要 `pull-requests: write`。必须使用 `resolve` 时，优先使用限定到目标仓库的 GitHub App Token，而不是权限宽泛的个人 Token。清理线程失败时，Inori 会记录 Warning 并继续发布当前评审，因此 Job 仍可能成功。
+`contents: write` 允许 Workflow Token 向仓库推送内容。只有确实需要保留 Resolved 线程历史时才建议使用 `resolve`；否则优先使用默认的 `replace`。`replace` 的删除操作只需要 `pull-requests: write`，但读取可信配置仍需 `contents: read`。必须使用 `resolve` 时，优先使用限定到目标仓库的 GitHub App Token，而不是权限宽泛的个人 Token。清理发生在新评审发布之后；清理失败时记录 Warning，Job 仍可能成功。
 
 该 GitHub 权限行为见 [GitHub Community Discussion #204269](https://github.com/orgs/community/discussions/204269)。
+
+## 开发与发布
+
+CI 复用 `verify.yml` 执行 lint、类型检查、测试、构建和 dist 一致性检查。发布前验证已合并 release PR 的固定 SHA；历史 Release 的 major 标签恢复使用独立验证链路，其失败不阻止新候选发布。release PR 维护独立运行。三条链路均限制在 main，按 job 所需授予写权限。
+
+major 标签只推进到相应链路已验证的 SHA；其他目标（包括并发新出现的 Release）会跳过并告警，留待后续运行。分支保护、必需检查和仅允许 squash 仍需管理员配置，工作流不会设置这些远端规则。设计取舍与后续计划见 [项目路线图](docs/ROADMAP.md)。
+
 ## 数据与隐私
 
 PR 的代码 Diff 将**直接发送**至你所配置的大模型服务商端点。除你自行指定的模型提供商外，任何第三方均无法接触你的代码。在私有仓库启用前，请确认所选模型服务商的数据与隐私条款。
